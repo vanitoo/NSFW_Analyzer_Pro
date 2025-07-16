@@ -18,7 +18,7 @@ class NSFWAnalyzerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("NSFW Analyzer Pro")
-        self.root.geometry("1200x800")
+        self.root.geometry("1400x800")
 
         # Базовые переменные (не блокирующие загрузку)
         self.stop_analysis = False
@@ -30,7 +30,7 @@ class NSFWAnalyzerApp:
 
         self.all_files = []  # Список всех файлов для фильтрации
 
-        # Создание интерфейса
+        self.model_type = tk.StringVar(value="yahoo")  # По умолчанию Yahoo
         self.create_widgets()
 
         # Обработка сообщений из очереди
@@ -207,6 +207,17 @@ class NSFWAnalyzerApp:
             state=tk.DISABLED
         )
         self.move_button.grid(row=0, column=8, padx=5)
+
+        # tk.Label(self.control_frame, text="Модель:").grid(row=0, column=9, padx=5)
+        # self.model_combobox = ttk.Combobox(
+        #     self.control_frame,
+        #     textvariable=self.model_type,
+        #     values=["Yahoo NSFW", "MobileNetV2", "TensorFlow Hub"],
+        #     state="readonly",
+        #     width=15
+        # )
+        # self.model_combobox.grid(row=0, column=10, padx=5)
+
 
         # Таблица результатов
         self.tree_frame = tk.Frame(self.left_paned)
@@ -404,6 +415,9 @@ class NSFWAnalyzerApp:
             self.log_message("Анализ уже выполняется\n")
             return
 
+        model_name = self.model_type.get()
+        self.log_message(f"🔧 Используется модель: {model_name}\n")
+
         self.stop_analysis = False
         self.analyze_button.config(text="Остановить")
         self.status_var.set("Анализ начат...")
@@ -487,7 +501,7 @@ class NSFWAnalyzerApp:
         self.image_queue.put(("status", "Анализ завершен"))
         self.image_queue.put(("analysis_complete", ""))
 
-    def is_nude_image(self, img_path, threshold):
+    def is_nude_image2(self, img_path, threshold):
         if not hasattr(self, 'n2') or not self.n2:
             self.load_model()
 
@@ -497,6 +511,73 @@ class NSFWAnalyzerApp:
         except Exception as e:
             self.log_message(f"Ошибка анализа {img_path}: {e}\n")
             return 0.0, False
+
+    def is_nude_image(self, img_path, threshold):
+        model_type = self.model_type.get().lower()
+
+        try:
+            if model_type == "yahoo":
+                if not hasattr(self, 'n2'):
+                    import opennsfw2
+                    self.n2 = opennsfw2
+                score = self.n2.predict_image(img_path)
+                return score, score >= threshold
+
+            elif model_type == "mobilenetv2":
+                if not hasattr(self, 'mobilenet_model'):
+                    import tensorflow as tf
+                    self.mobilenet_model = tf.keras.applications.MobileNetV2(weights="imagenet")
+                    self.log_message("MobileNetV2 загружена\n")
+                # Здесь нужно добавить предобработку изображения и логику предсказания
+                # (пример ниже)
+
+            elif model_type == "tensorflow hub":
+                if not hasattr(self, 'tfhub_model'):
+                    import tensorflow as tf
+                    import tensorflow_hub as hub
+                    model_url = "https://tfhub.dev/google/openimages/v4/ssd/mobilenetv2/classification/4"
+                    self.tfhub_model = hub.load(model_url)
+                    self.log_message("TF Hub Detector загружен\n")
+                # Предсказание через TF Hub (упрощённый пример)
+                img = tf.io.read_file(img_path)
+                img = tf.image.decode_jpeg(img, channels=3)
+                img = tf.image.resize(img, [224, 224])
+                img = tf.expand_dims(img, axis=0)
+                predictions = self.tfhub_model(img)
+                score = predictions.numpy()[0][1]  # Пример для бинарной классификации
+                return score, score >= threshold
+
+        except Exception as e:
+            self.log_message(f"Ошибка модели {model_type}: {e}\n")
+        return 0.0, False
+
+    def preprocess_image(self, img_path):
+        from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+        import tensorflow as tf
+        img = tf.io.read_file(img_path)
+        img = tf.image.decode_jpeg(img, channels=3)
+        img = tf.image.resize(img, [224, 224])
+        img = preprocess_input(img)
+        return tf.expand_dims(img, axis=0)
+
+    def load_mobilenet_nsfw(self):
+        """Загружает MobileNetV2 с NSFW-весами"""
+        if not hasattr(self, 'mobilenet_nsfw'):
+            import tensorflow as tf
+            model = tf.keras.Sequential([
+                tf.keras.applications.MobileNetV2(
+                    input_shape=(224, 224, 3),
+                    include_top=False,
+                    weights="imagenet"
+                ),
+                tf.keras.layers.GlobalAveragePooling2D(),
+                tf.keras.layers.Dense(1, activation="sigmoid")
+            ])
+            # Здесь можно загрузить свои веса (например, с Hugging Face)
+            model.load_weights("path_to_nsfw_weights.h5")
+            self.mobilenet_nsfw = model
+            self.log_message("MobileNetV2 (NSFW) загружена\n")
+        return self.mobilenet_nsfw
 
     def load_model(self):
         if not hasattr(self, 'n2') or not self.n2:

@@ -1,7 +1,7 @@
 @echo off
 title %cd%
 
-if not exist venv (
+if not exist .venv (
     echo Creating virtual environment...
     python -m venv .venv
 )
@@ -9,12 +9,12 @@ if not exist venv (
 echo Activating virtual environment...
 call .venv\Scripts\activate
 
-if not exist .venv\Lib\site-packages\installed (
+if not exist .venv\.setup_done (
     if exist requirements.txt (
-        echo Installing dependencies...
+        echo Updating pip and installing dependencies...
+        python -m pip install --upgrade pip
         pip install -r requirements.txt
-		python.exe -m pip install --upgrade pip
-        echo. > .venv\Lib\site-packages\installed
+        echo. > .venv\.setup_done
     ) else (
         echo requirements.txt not found, skipping dependency installation.
     )
@@ -23,9 +23,11 @@ if not exist .venv\Lib\site-packages\installed (
 )
 
 if exist main.py (
-    echo Starting ...
+    echo Starting program...
     python main.py
+) else (
+    echo main.py not found.
 )
 
-echo done
-pause
+echo Done.
+rem pause

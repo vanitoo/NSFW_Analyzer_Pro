@@ -62,7 +62,7 @@ pip install -r requirements.txt
 4. Запусти приложение:
 
 ```bash
-python main.py
+python main.v1.py
 ```
 
 ---
