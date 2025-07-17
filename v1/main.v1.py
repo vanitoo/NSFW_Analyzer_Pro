@@ -745,7 +745,7 @@ class NSFWAnalyzerApp:
         self.log_console.update()
         # Автосохранение лога
         try:
-            with open("analyzer_nu.log", "a", encoding="utf-8") as f:
+            with open("../analyzer_nu.log", "a", encoding="utf-8") as f:
                 f.write(message)
         except Exception as e:
             print(f"[Ошибка записи в лог-файл] {e}")

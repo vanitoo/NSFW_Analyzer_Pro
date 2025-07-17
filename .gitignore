@@ -4,3 +4,4 @@ __pycache__/
 .idea/
 *_tmp/
 
+nsfw_model_mobilenet_v2/

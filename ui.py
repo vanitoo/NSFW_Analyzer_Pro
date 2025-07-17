@@ -1,14 +1,19 @@
-import threading
+import datetime
+import functools
+import os
+import queue
 import shutil
+import subprocess
+import sys
+import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, scrolledtext
-from PIL import Image, ImageTk
-import os, queue, datetime, threading, sys, subprocess
-from scanner import scan_folder_async, update_file_list
-from analyzer import initialize_model, analyze_images, is_nude_image
-from utils import log_message, convert_size, get_cpu_cores,  sort_treeview_column
-import functools
 
+from PIL import Image, ImageTk
+
+from analyzer import initialize_model, analyze_images
+from scanner import scan_folder_async, update_file_list
+from utils import log_message
 
 
 class NSFWAnalyzerApp:
@@ -21,7 +26,6 @@ class NSFWAnalyzerApp:
         self.initialize_model = functools.partial(initialize_model, self)
         self.analyze_images = functools.partial(analyze_images, self)
         self.update_file_list = functools.partial(update_file_list, self)
-
 
         # Базовые переменные (не блокирующие загрузку)
         self.stop_analysis = False
@@ -41,10 +45,10 @@ class NSFWAnalyzerApp:
         # Обработка сообщений из очереди
         self.root.after(100, self.process_queue)
 
-        # Инициализация прогресс-бара
-        # self.progress = ttk.Progressbar(self.status_bar, mode='indeterminate', length=200)
-        self.progress = ttk.Progressbar(self.status_bar, mode='determinate', length=600, maximum=100)
-        self.progress.pack(side=tk.RIGHT, padx=5)
+        # # Инициализация прогресс-бара
+        # # self.progress = ttk.Progressbar(self.status_bar, mode='indeterminate', length=200)
+        # self.progress = ttk.Progressbar(self.status_bar, mode='determinate', length=600, maximum=100)
+        # self.progress.pack(side=tk.RIGHT, padx=5)
 
         self.start_background_loading()
         threading.Thread(target=self.initialize_backend, daemon=True).start()
@@ -66,7 +70,6 @@ class NSFWAnalyzerApp:
         threading.Thread(target=load_in_background, daemon=True).start()
         self.root.after(100, self.check_loading_status)
 
-
     def check_loading_status(self):
         """Проверяет прогресс загрузки"""
         if self.libs_loaded:
@@ -82,8 +85,6 @@ class NSFWAnalyzerApp:
 
         # Активируем кнопки
         self.analyze_button.config(state=tk.NORMAL)
-
-
 
     def initialize_backend(self):
         """Инициализирует тяжелые компоненты в фоне"""
@@ -103,7 +104,6 @@ class NSFWAnalyzerApp:
         self.control_frame = tk.Frame(self.root)
         self.control_frame.pack(fill=tk.X, padx=5, pady=5)
 
-
         # Основной контейнер
         self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         self.main_paned.pack(fill=tk.BOTH, expand=True)
@@ -122,8 +122,8 @@ class NSFWAnalyzerApp:
         # self.preview_label.pack(fill=tk.BOTH, expand=True)
 
         # Обработчик изменения размера окна (добавьте эти строки)
-        self.preview_frame.bind("<Configure>", self.resize_preview)
-        self.root.bind("<Configure>", lambda e: self.resize_preview())
+        # self.preview_frame.bind("<Configure>", self.resize_preview)
+        # self.root.bind("<Configure>", lambda e: self.resize_preview())
 
         # # Панель управления
         # self.control_frame = tk.Frame(self.root)
@@ -145,9 +145,17 @@ class NSFWAnalyzerApp:
 
         tk.Label(self.control_frame, text="Фильтр:").grid(row=0, column=5, padx=5)
         self.filter_var = tk.StringVar(value="all")
-        self.filter_combobox = ttk.Combobox(self.control_frame, textvariable=self.filter_var,
-                                            values=["Все", "Только НЮ", "Только безопасные", "Неопределённые"],
-                                            state="readonly", width=15)
+        self.filter_combobox = ttk.Combobox(
+            self.control_frame,
+            textvariable=self.filter_var,
+            values=["Все", "Только НЮ", "Только безопасные", "Неопределённые", "BAD"],  # 👈 добавили BAD
+            state="readonly",
+            width=15
+        )
+
+        # self.filter_combobox = ttk.Combobox(self.control_frame, textvariable=self.filter_var,
+        #                                     values=["Все", "Только НЮ", "Только безопасные", "Неопределённые"],
+        #                                     state="readonly", width=15)
         self.filter_combobox.grid(row=0, column=6, padx=5)
 
         self.analyze_button = tk.Button(self.control_frame, text="Анализировать", command=self.toggle_analysis)
@@ -155,8 +163,8 @@ class NSFWAnalyzerApp:
 
         self.move_button = tk.Button(
             self.control_frame,
-            text="Переместить НЮ",
-            command=self.move_nude_images,
+            text="Переместить",
+            command=self.move_images_by_filter,
             state=tk.DISABLED
         )
         self.move_button.grid(row=0, column=8, padx=5)
@@ -172,7 +180,6 @@ class NSFWAnalyzerApp:
         )
         self.model_combobox.grid(row=0, column=10, padx=5)
 
-
         # Таблица результатов
         self.tree_frame = tk.Frame(self.left_paned)
         self.left_paned.add(self.tree_frame, height=500)
@@ -184,7 +191,7 @@ class NSFWAnalyzerApp:
         self.tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
 
         self.result_tree = ttk.Treeview(self.tree_frame,
-                                        columns=("#", "Имя файла", "Путь", "Размер", "Дата изменения", "Порог", "НЮ"),
+                                        columns=("#", "Имя файла", "Путь", "Размер", "Дата изменения", "Порог", "Статус"),
                                         show="headings",
                                         yscrollcommand=self.tree_scroll_y.set,
                                         xscrollcommand=self.tree_scroll_x.set)
@@ -202,7 +209,7 @@ class NSFWAnalyzerApp:
             "Размер": {"width": 80, "anchor": "e"},
             "Дата изменения": {"width": 120},
             "Порог": {"width": 80, "anchor": "center"},
-            "НЮ": {"width": 60, "anchor": "center"}
+            "Статус": {"width": 60, "anchor": "center"}
         }
 
         # for col, params in columns.items():
@@ -229,17 +236,173 @@ class NSFWAnalyzerApp:
         self.preview_label = tk.Label(self.preview_frame)
         self.preview_label.pack(fill=tk.BOTH, expand=True)
 
-        # Статус бар
+        # # Статус бар
+        # status_frame = tk.Frame(self.root)
+        # status_frame.pack(side="bottom", fill="x")
+        # #
+        # self.status_bar = tk.Label(status_frame, text="", anchor="w", width=60)  # фикс ширина
+        # self.status_bar.pack(side="left", padx=5)
+        # #
+        # # self.progress = ttk.Progressbar(status_frame, orient="horizontal", length=300, mode="determinate")
+        # # self.progress.pack(side="right", padx=5)
+        #
+        # self.status_var = tk.StringVar()
+        # self.status_bar = tk.Label(self.root, textvariable=self.status_var, bd=1, relief=tk.SUNKEN, anchor=tk.W)
+        # self.status_bar.pack(fill=tk.X, side=tk.BOTTOM)
+        # #
+        # # # Инициализация прогресс-бара
+        # # # self.progress = ttk.Progressbar(self.status_bar, mode='indeterminate', length=200)
+        # self.progress = ttk.Progressbar(self.status_bar, mode='determinate', length=600, maximum=100)
+        # self.progress.pack(side=tk.RIGHT, padx=5)
+
+        # Создаём контейнер для статуса и прогрессбара
+        status_frame = tk.Frame(self.root, bd=1, relief=tk.SUNKEN)
+        status_frame.pack(side="bottom", fill="x")
+
+        # Статус-текст
         self.status_var = tk.StringVar()
-        self.status_bar = tk.Label(self.root, textvariable=self.status_var, bd=1, relief=tk.SUNKEN, anchor=tk.W)
-        self.status_bar.pack(fill=tk.X, side=tk.BOTTOM)
+        self.status_bar = tk.Label(status_frame, textvariable=self.status_var, anchor="w", width=60)
+        self.status_bar.pack(side="left", padx=5)
+
+        # Прогресс-бар
+        self.progress = ttk.Progressbar(status_frame, mode="determinate", length=300, maximum=100)
+        self.progress.pack(side="right", padx=5)
 
         # Привязка событий
         self.result_tree.bind("<Double-1>", self.open_image)
         self.result_tree.bind("<<TreeviewSelect>>", self.show_preview)
         self.filter_var.trace_add('write', self.apply_filter)
 
+        # Enter – открыть изображение
+        self.result_tree.bind("<Return>", self.open_image)
+        # F6 – перемещение
+        self.root.bind("<F6>", self.move_selected_file_by_filter)
+        # Del – удалить файл
+        self.root.bind("<Delete>", self.delete_selected_file)
 
+        self.result_tree.tag_configure('mobilenet', background='#e0f7ff')
+        self.result_tree.tag_configure('bad', background='#ffe680')
+        self.result_tree.tag_configure('nude', background='#ffcccc')
+        self.result_tree.tag_configure('safe', background='#ccffcc')
+
+    def mark_bad_file(self, img_path):
+        # Находим item в Treeview
+        for item in self.result_tree.get_children():
+            values = list(self.result_tree.item(item)['values'])
+            if values[2] == img_path:
+                # Обновляем в Treeview
+                self.result_tree.set(item, "НЮ", "BAD")
+                self.result_tree.item(item, tags=("bad",))
+                # Обновляем в all_files
+                for i, f in enumerate(self.all_files):
+                    if f[2] == img_path:
+                        updated = list(f)
+                        updated[6] = "BAD"
+                        self.all_files[i] = tuple(updated)
+                        break
+                break
+
+    def move_selected_file_by_filter(self, event=None):
+        folder_path = self.path_entry.get()
+        if not folder_path:
+            return
+
+        filter_type = self.filter_var.get()
+        if filter_type == "Только НЮ":
+            target_subfolder = "NU"
+        elif filter_type == "Неопределённые":
+            target_subfolder = "BAD"
+        else:
+            messagebox.showinfo("Инфо", "Перемещение доступно только для фильтров 'Только НЮ' и 'Неопределённые'")
+            return
+
+        selected = self.result_tree.selection()
+        if not selected:
+            return  # ничего не выбрано
+
+        target_folder = os.path.join(folder_path, target_subfolder)
+        os.makedirs(target_folder, exist_ok=True)
+
+        moved_count = 0
+        for item in selected:
+            values = self.result_tree.item(item)['values']
+            img_path = values[2]
+            nude_status = str(values[6]).strip()
+
+            # проверяем статус по фильтру
+            if filter_type == "Только НЮ" and nude_status != "✓":
+                continue
+            if filter_type == "Неопределённые" and nude_status in ("✓", "✗"):
+                continue
+
+            try:
+                filename = os.path.basename(img_path)
+                dst_path = os.path.join(target_folder, filename)
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                os.rename(img_path, dst_path)
+                log_message(f"[MOVE ONE] {img_path} -> {dst_path}\n", self.log_console)
+                self.result_tree.set(item, "Путь", dst_path)
+                moved_count += 1
+            except Exception as e:
+                log_message(f"[ERROR MOVE ONE] {img_path}: {e}\n", self.log_console)
+
+        if moved_count > 0:
+            self.status_var.set(f"Перемещён {moved_count} файл(ов) в {target_folder}")
+
+    def delete_selected_file(self, event=None):
+        selected = self.result_tree.selection()
+        if not selected:
+            return
+        for item in selected:
+            img_path = self.result_tree.item(item)['values'][2]
+            try:
+                os.remove(img_path)
+                log_message(f"[DELETE] {img_path}\n", self.log_console)
+                self.result_tree.delete(item)
+            except Exception as e:
+                log_message(f"[ERROR DELETE] {img_path}: {e}\n", self.log_console)
+
+    def move_images_by_filter(self, *_):
+        folder_path = self.path_entry.get()
+        if not folder_path:
+            return
+
+        filter_type = self.filter_var.get()
+        if filter_type == "Только НЮ":
+            target_subfolder = "NU"
+        elif filter_type == "Неопределённые":
+            target_subfolder = "BAD"
+        else:
+            messagebox.showinfo("Инфо", "Перемещение доступно только для фильтров 'Только НЮ' и 'Неопределённые'")
+            return
+
+        target_folder = os.path.join(folder_path, target_subfolder)
+        os.makedirs(target_folder, exist_ok=True)
+
+        moved_count = 0
+        for item in self.result_tree.get_children():
+            values = self.result_tree.item(item)['values']
+            img_path = values[2]
+            nude_status = str(values[6]).strip()
+            # Логика отбора по фильтру
+            if filter_type == "Только НЮ" and nude_status != "✓":
+                continue
+            if filter_type == "Неопределённые" and nude_status in ("✓", "✗"):
+                continue
+
+            try:
+                filename = os.path.basename(img_path)
+                dst_path = os.path.join(target_folder, filename)
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                os.rename(img_path, dst_path)
+                log_message(f"[MOVE] {img_path} -> {dst_path}\n", self.log_console)
+                self.result_tree.set(item, "Путь", dst_path)
+                moved_count += 1
+            except Exception as e:
+                log_message(f"[ERROR MOVE] {img_path}: {e}\n", self.log_console)
+
+        self.status_var.set(f"Перемещено {moved_count} файлов в {target_folder}")
+        messagebox.showinfo("Готово", f"Перемещено {moved_count} файлов")
 
     def move_nude_images(self):
         folder_path = self.path_entry.get()
@@ -272,7 +435,6 @@ class NSFWAnalyzerApp:
         self.status_var.set(f"Перемещено {moved_count} файлов в {target_folder}")
         messagebox.showinfo("Готово", f"Перемещено {moved_count} файлов")
 
-
     def browse_folder(self):
         folder_path = filedialog.askdirectory()
         if not folder_path:
@@ -290,9 +452,6 @@ class NSFWAnalyzerApp:
             args=(folder_path,),
             daemon=True
         ).start()
-
-
-
 
     def load_images_from_folder(self, folder_path):
         self.result_tree.delete(*self.result_tree.get_children())
@@ -354,7 +513,6 @@ class NSFWAnalyzerApp:
         # ...
         self.analysis_thread = threading.Thread(target=self.analyze_images, daemon=True)
         self.analysis_thread.start()
-
 
     def process_queue(self):
         if not getattr(self, "running", True):
@@ -425,14 +583,18 @@ class NSFWAnalyzerApp:
                         self.progress["value"] = current
                         self.progress.update()
 
+                    elif task[0] == "mark_bad":
+                        bad_path = task[1]
+                        self.mark_bad_file(bad_path)
+
+
         except queue.Empty:
             pass
 
         if self.running:
             self.root.after(100, self.process_queue)
 
-
-    def apply_filter(self, *args):
+    def apply_filter2(self, *args):
         if getattr(self, "analysis_running", False):
             messagebox.showwarning("Анализ", "Нельзя менять фильтр во время анализа.")
             return
@@ -457,6 +619,30 @@ class NSFWAnalyzerApp:
 
         self.update_highlighting()
 
+    def apply_filter(self, *args):
+        if getattr(self, "analysis_running", False):
+            messagebox.showwarning("Анализ", "Нельзя менять фильтр во время анализа.")
+            return
+
+        filter_type = self.filter_var.get()
+        self.result_tree.delete(*self.result_tree.get_children())
+
+        for file_data in self.all_files:
+            nude_status = str(file_data[6]).strip()
+
+            if filter_type == "Только НЮ" and nude_status != "✓":
+                continue
+            elif filter_type == "Только безопасные" and nude_status != "✗":
+                continue
+            elif filter_type == "Неопределённые" and nude_status in ("✓", "✗", "BAD"):
+                continue
+            elif filter_type == "BAD" and nude_status != "BAD":  # 👈 новый фильтр
+                continue
+
+            self.result_tree.insert("", "end", values=file_data)
+
+        self.update_highlighting()
+
     def restore_all_items(self):
         """Восстанавливает все элементы в Treeview"""
         children = self.result_tree.get_children()
@@ -466,7 +652,7 @@ class NSFWAnalyzerApp:
     def update_highlighting(self):
         """Обновляет подсветку всех видимых элементов"""
         for item in self.result_tree.get_children():
-            nude_status = self.result_tree.set(item, "НЮ")
+            nude_status = self.result_tree.set(item, "Статус")
             tags = ('nude',) if nude_status == "✓" else ('safe',) if nude_status == "✗" else ()
             self.result_tree.item(item, tags=tags)
 
@@ -484,50 +670,47 @@ class NSFWAnalyzerApp:
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось открыть изображение: {e}")
 
-    def show_preview(self, event):
-        selected_item = self.result_tree.selection()
-        if not selected_item:
+    def show_preview(self, event=None):
+        # получаем выбранный элемент
+        selected = self.result_tree.selection()
+        if not selected:
             return
+        item = selected[0]
+        img_path = self.result_tree.item(item)['values'][2]
 
-        img_path = self.result_tree.item(selected_item[0])['values'][2]
-        self.current_image_path = img_path  # Сохраняем текущий путь
+        # сохраняем путь, чтобы не терять при ресайзе (если вдруг понадобится)
+        self._last_preview_path = img_path
 
         try:
-            # Очищаем предыдущее изображение
-            self.preview_label.config(image=None)
-            self.preview_label.image = None
-
-            # Загружаем новое изображение
             img = Image.open(img_path)
-
-            # Получаем размеры области превью
             preview_width = self.preview_frame.winfo_width() - 20
             preview_height = self.preview_frame.winfo_height() - 20
+            scale = min(preview_width / img.width, preview_height / img.height)
+            new_size = (int(img.width * scale), int(img.height * scale))
+            img = img.resize(new_size, Image.Resampling.LANCZOS)
 
-            # Вычисляем коэффициенты масштабирования
-            width_ratio = preview_width / img.width
-            height_ratio = preview_height / img.height
-            scale_ratio = min(width_ratio, height_ratio)
-
-            # Масштабируем с сохранением пропорций
-            new_width = int(img.width * scale_ratio)
-            new_height = int(img.height * scale_ratio)
-            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-
-            # Конвертируем для Tkinter
-            photo = ImageTk.PhotoImage(img)
-
-            # Отображаем изображение
-            self.preview_label.config(image=photo)
-            self.preview_label.image = photo
-
+            tk_img = ImageTk.PhotoImage(img)
+            self.preview_label.config(image=tk_img, text="")  # сбрасываем текст
+            self.preview_label.image = tk_img
         except Exception as e:
             self.preview_label.config(image=None, text="Не удалось загрузить изображение")
-            log_message(f"Ошибка загрузки превью: {e}\n")
+            print(f"Ошибка загрузки превью: {e}")
 
-    def resize_preview(self, event=None):
-        if hasattr(self, 'current_image_path'):
-            self.show_preview(None)
+    # def resize_preview(self, event=None):
+    #     # Перерисовываем только если есть текущая картинка
+    #     if hasattr(self, "_last_preview_path") and self._last_preview_path:
+    #         try:
+    #             img = Image.open(self._last_preview_path)
+    #             preview_width = self.preview_frame.winfo_width() - 20
+    #             preview_height = self.preview_frame.winfo_height() - 20
+    #             scale = min(preview_width / img.width, preview_height / img.height)
+    #             new_size = (int(img.width * scale), int(img.height * scale))
+    #             img = img.resize(new_size, Image.Resampling.LANCZOS)
+    #             tk_img = ImageTk.PhotoImage(img)
+    #             self.preview_label.config(image=tk_img)
+    #             self.preview_label.image = tk_img
+    #         except Exception as e:
+    #             print(f"Ошибка ресайза превью: {e}")
 
     def on_close(self):
         self.running = False
@@ -541,7 +724,7 @@ class NSFWAnalyzerApp:
         if hasattr(self, 'tfhub_model'):
             del self.tfhub_model
 
-        self.running = False       # останавливает process_queue
+        self.running = False  # останавливает process_queue
         self.stop_analysis = True  # остановить анализ
 
         # Очистка очереди ДО закрытия окна
@@ -555,5 +738,3 @@ class NSFWAnalyzerApp:
 
         # Теперь можно безопасно уничтожить окно
         self.root.destroy()
-
-

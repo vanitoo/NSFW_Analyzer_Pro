@@ -10,6 +10,7 @@ def convert_size(size_bytes):
         size_bytes /= 1024
     return f"{size_bytes:.1f} ТБ"
 
+
 def get_cpu_cores():
     """Возвращает количество доступных логических ядер"""
     import multiprocessing
@@ -18,6 +19,7 @@ def get_cpu_cores():
         return os.cpu_count() or 4
     except Exception:
         return 4  # fallback
+
 
 def log_message(message, console=None):
     if console:
@@ -30,6 +32,7 @@ def log_message(message, console=None):
     except Exception as e:
         print(f"[Ошибка записи в лог-файл] {e}")
     print(message.strip())  # Вывод в консоль Python
+
 
 def sort_treeview_column(self, col, reverse):
     data = [(self.result_tree.set(k, col), k) for k in self.result_tree.get_children('')]
