@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import gc
+import os
 import sys
 from pathlib import Path
 from typing import Any, Callable
+
+_CACHE_DIR = Path.home() / ".cache" / "nsfw-analyzer-pro"
+os.environ.setdefault("HF_HOME", str(_CACHE_DIR / "huggingface"))
 
 MODEL_MARQO = "Marqo Fast"
 MODEL_FREEPIK = "Freepik 4-Level"
