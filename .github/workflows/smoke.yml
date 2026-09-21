@@ -1,0 +1,22 @@
+name: Python smoke checks
+
+on:
+  push:
+    branches:
+      - cleanup/stabilize-root
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile Python sources
+        run: python -m compileall -q .
+      - name: Parse project metadata
+        run: python -c "import tomllib; tomllib.load(open('pyproject.toml','rb')); print('pyproject.toml OK')"
