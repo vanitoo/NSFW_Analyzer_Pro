@@ -10,6 +10,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+_CACHE_DIR = Path.home() / ".cache" / "nsfw-analyzer-pro"
+os.environ.setdefault("TFHUB_CACHE_DIR", str(_CACHE_DIR / "tfhub"))
+os.environ.setdefault("OPENNSFW2_HOME", str(_CACHE_DIR / "opennsfw2"))
+
 import keras
 import numpy as np
 import tensorflow as tf
@@ -238,10 +242,6 @@ def analyze_images(
         return
 
     start_total = time.perf_counter()
-    max_workers = max(
-        1,
-        min(int(getattr(self, "inference_workers", 2)), get_cpu_cores(), total_items),
-    )
 
     try:
         initialize_model(self, model_name)
@@ -249,6 +249,11 @@ def analyze_images(
         _log(self, f"❌ Ошибка инициализации модели: {exc}\n")
         _emit(self, "analysis_error", str(exc))
         return
+
+    max_workers = max(
+        1,
+        min(int(getattr(self, "inference_workers", 2)), get_cpu_cores(), total_items),
+    )
 
     _log(
         self,
