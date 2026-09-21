@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nsfw-analyzer-pro"
-version = "2.2.0"
+version = "2.3.0"
 description = "Настольное приложение для локального анализа изображений на NSFW-контент"
 authors = [{ name = "Vanitoo" }]
 license = { text = "MIT" }
