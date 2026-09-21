@@ -12,9 +12,9 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from PIL import Image, ImageTk
 
-from analyzer import MODEL_CHOICES, analyze_images
-from scanner import scan_folder_async
-from utils import log_message
+from .analyzer import MODEL_CHOICES, analyze_images
+from .scanner import scan_folder_async
+from .utils import log_message
 
 
 class NSFWAnalyzerApp:

@@ -136,24 +136,29 @@ nsfw-analyzer
 
 ```text
 .
-├── main.py           # точка входа и console script
-├── ui.py             # Tkinter UI; вся работа с Tk выполняется в main thread
-├── scanner.py        # фоновое сканирование файлов
-├── analyzer.py       # маршрутизация моделей и многопоточный анализ
-├── models_legacy.py  # Yahoo/GantMan/TF runtime helpers; GantMan TFLite
-├── models_extra.py   # Marqo / Freepik / NudeNet
-├── utils.py          # общие утилиты и логирование
-├── requirements.txt         # базовые зависимости
-├── requirements-models.txt  # Marqo / Freepik / NudeNet
-├── pyproject.toml           # метаданные пакета и Ruff
-├── START.cmd                # обычный запуск под Windows
-├── START_NVIDIA.cmd         # запуск с CUDA PyTorch для NVIDIA
-├── v1/               # архив ранней реализации
-└── v3/               # экспериментальный рефакторинг
+├── main.py                    # минимальная точка входа
+├── src/
+│   ├── __init__.py            # пакет приложения
+│   ├── ui.py                  # Tkinter UI
+│   ├── scanner.py             # фоновое сканирование файлов
+│   ├── analyzer.py            # маршрутизация моделей и анализ
+│   ├── models_legacy.py       # Yahoo/GantMan/TF runtime helpers
+│   ├── models_extra.py        # Marqo / Freepik / NudeNet
+│   └── utils.py               # общие утилиты и логирование
+├── requirements.txt           # базовые зависимости
+├── requirements-models.txt    # Marqo / Freepik / NudeNet
+├── pyproject.toml             # метаданные пакета и Ruff
+├── START.cmd                  # обычный запуск под Windows
+└── START_NVIDIA.cmd           # запуск с CUDA PyTorch для NVIDIA
 ```
+
+Старые каталоги `v1/` и `v3/` удалены: их история остаётся доступна в Git, а рабочая реализация теперь находится только в `src/`.
 
 ## Что изменено в 2.4
 
+- рабочие модули перенесены из корня в пакет `src/`; в корне оставлен только `main.py`;
+- удалены архивные каталоги `v1/` и `v3/`;
+- импорты переведены на пакетные относительные импорты, а packaging обновлён под новую структуру;
 - TensorFlow закреплён на **2.20.0** вместо широкого диапазона версий;
 - GantMan переведён с legacy Keras `TFSMLayer`/SavedModel на официальный `saved_model.tflite` из release 1.2.0;
 - GantMan больше не скачивает плавающий `master.zip`: используется фиксированный официальный release;

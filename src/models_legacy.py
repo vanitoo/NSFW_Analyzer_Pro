@@ -11,16 +11,16 @@ from typing import Any, Callable
 import numpy as np
 from PIL import Image
 
-from utils import get_cpu_cores
+from .paths import DOWNLOADS_DIR, GANTMAN_CACHE_DIR
+from .utils import get_cpu_cores
 
-CACHE_DIR = Path.home() / ".cache" / "nsfw-analyzer-pro"
 GANTMAN_VERSION = "1.2.0"
 GANTMAN_RELEASE_URL = (
     "https://github.com/GantMan/nsfw_model/releases/download/"
     "1.2.0/mobilenet_v2_140_224.1.zip"
 )
-GANTMAN_ARCHIVE = CACHE_DIR / "downloads" / "gantman-1.2.0.zip"
-GANTMAN_ROOT = CACHE_DIR / "gantman" / GANTMAN_VERSION
+GANTMAN_ARCHIVE = DOWNLOADS_DIR / "gantman-1.2.0.zip"
+GANTMAN_ROOT = GANTMAN_CACHE_DIR / GANTMAN_VERSION
 GANTMAN_LABELS = ("drawings", "hentai", "neutral", "porn", "sexy")
 GANTMAN_UNSAFE = (1, 3, 4)
 

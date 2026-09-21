@@ -32,7 +32,8 @@ models = [
 nsfw-analyzer = "main:main"
 
 [tool.setuptools]
-py-modules = ["main", "ui", "scanner", "analyzer", "models_extra", "models_legacy", "utils"]
+py-modules = ["main"]
+packages = ["src"]
 
 [tool.ruff]
 target-version = "py311"
@@ -45,7 +46,7 @@ fixable = ["ALL"]
 unfixable = ["F401", "F841"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["analyzer", "scanner", "ui", "utils"]
+known-first-party = ["src"]
 required-imports = ["from __future__ import annotations"]
 
 [tool.ruff.format]

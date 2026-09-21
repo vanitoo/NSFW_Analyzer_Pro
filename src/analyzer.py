@@ -4,25 +4,21 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 from typing import Any
-
-_CACHE_DIR = Path.home() / ".cache" / "nsfw-analyzer-pro"
-os.environ.setdefault("TFHUB_CACHE_DIR", str(_CACHE_DIR / "tfhub"))
-os.environ.setdefault("OPENNSFW2_HOME", str(_CACHE_DIR / "opennsfw2"))
 
 import numpy as np
 from PIL import Image
 
-from models_extra import (
+from .models_extra import (
     MODEL_FREEPIK,
     MODEL_MARQO,
     MODEL_NUDENET,
     initialize_extra_model,
     release_extra_model,
 )
-from models_legacy import initialize_gantman, tensorflow_device_name
-from utils import get_cpu_cores
+from .models_legacy import initialize_gantman, tensorflow_device_name
+from .paths import OPENNSFW2_WEIGHTS
+from .utils import get_cpu_cores
 
 MODEL_YAHOO = "Yahoo NSFW"
 MODEL_GANTMAN = "GantMan NSFW"
@@ -96,7 +92,11 @@ def initialize_model(self: Any, model_name: str) -> None:
                 import opennsfw2
 
                 self.model = opennsfw2
-                self.predict_fn = lambda path: (float(opennsfw2.predict_image(path)), None)
+                weights_path = str(OPENNSFW2_WEIGHTS)
+                self.predict_fn = lambda path: (
+                    float(opennsfw2.predict_image(path, weights_path=weights_path)),
+                    None,
+                )
 
             elif normalized in {"marqo", "freepik", "nudenet"}:
                 initialize_extra_model(self, normalized, _log)

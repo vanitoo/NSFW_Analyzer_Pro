@@ -17,6 +17,15 @@ jobs:
         with:
           python-version: "3.11"
       - name: Compile Python sources
-        run: python -m compileall -q .
+        run: python -m compileall -q main.py src
       - name: Parse project metadata
         run: python -c "import tomllib; tomllib.load(open('pyproject.toml','rb')); print('pyproject.toml OK')"
+
+      - name: Verify source layout
+        run: |
+          test -f main.py
+          test -f src/__init__.py
+          test -f src/ui.py
+          test ! -e ui.py
+          test ! -e v1
+          test ! -e v3

@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from utils import convert_size
+from .utils import convert_size
 
 SUPPORTED_FORMATS = {".png", ".jpg", ".jpeg", ".bmp", ".gif"}
 IGNORED_OUTPUT_DIRS = {"NU", "BAD", "UNKNOWN"}
