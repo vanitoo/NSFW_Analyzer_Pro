@@ -1,5 +1,5 @@
-import datetime
-import functools
+from __future__ import annotations
+
 import os
 import queue
 import shutil
@@ -7,156 +7,76 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog, scrolledtext
+from pathlib import Path
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from PIL import Image, ImageTk
 
-from analyzer import initialize_model, analyze_images
-from scanner import scan_folder_async, update_file_list
+from analyzer import MODEL_CHOICES, analyze_images
+from scanner import scan_folder_async
 from utils import log_message
 
 
 class NSFWAnalyzerApp:
-    def __init__(self, root):
+    def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("NSFW Analyzer Pro")
         self.root.geometry("1400x800")
+        self.root.minsize(980, 620)
 
-        self.scan_folder_async = functools.partial(scan_folder_async, self)
-        self.initialize_model = functools.partial(initialize_model, self)
-        self.analyze_images = functools.partial(analyze_images, self)
-        self.update_file_list = functools.partial(update_file_list, self)
-
-        # Базовые переменные (не блокирующие загрузку)
-        self.stop_analysis = False
-        self.analysis_thread = None
-        self.image_queue = queue.Queue()
-        self.model_loaded = False
-        self.model = None
-        self.libs_loaded = False  # Добавлено
         self.running = True
-        self.predict_fn = None  # Добавляем инициализацию атрибута
+        self.stop_analysis = False
+        self.analysis_thread: threading.Thread | None = None
+        self.scan_thread: threading.Thread | None = None
+        self.image_queue: queue.Queue = queue.Queue()
 
-        self.all_files = []  # Список всех файлов для фильтрации
+        self.model = None
+        self.model_name: str | None = None
+        self.predict_fn = None
+        self.model_lock = threading.Lock()
 
-        # Создание интерфейса
-        self.create_widgets()
+        self.all_files: list[list] = []
+        self._last_preview_path: str | None = None
 
-        # Обработка сообщений из очереди
+        self._create_widgets()
         self.root.after(100, self.process_queue)
+        self.status_var.set("Готов к работе")
 
-        # # Инициализация прогресс-бара
-        # # self.progress = ttk.Progressbar(self.status_bar, mode='indeterminate', length=200)
-        # self.progress = ttk.Progressbar(self.status_bar, mode='determinate', length=600, maximum=100)
-        # self.progress.pack(side=tk.RIGHT, padx=5)
-
-        self.start_background_loading()
-        threading.Thread(target=self.initialize_backend, daemon=True).start()
-
-    def start_background_loading(self):
-        """Запускает фоновую загрузку тяжелых зависимостей"""
-
-        def load_in_background():
-            try:
-                # Загружаем только PIL (остальные модели будем грузить по требованию)
-                from PIL import Image, ImageTk
-                self.Image = Image
-                self.ImageTk = ImageTk
-                self.libs_loaded = True
-                log_message("Базовые библиотеки загружены\n")
-            except Exception as e:
-                log_message(f"Ошибка загрузки библиотек: {e}\n")
-
-        threading.Thread(target=load_in_background, daemon=True).start()
-        self.root.after(100, self.check_loading_status)
-
-    def check_loading_status(self):
-        """Проверяет прогресс загрузки"""
-        if self.libs_loaded:
-            self.finish_ui_setup()
-        else:
-            self.root.after(100, self.check_loading_status)
-
-    def finish_ui_setup(self):
-        """Дозагружает компоненты, требующие библиотек"""
-        # Здесь инициализация превью и других зависимых элементов
-        # self.preview_label = tk.Label(self.preview_frame)
-        # self.preview_label.pack(fill=tk.BOTH, expand=True)
-
-        # Активируем кнопки
-        self.analyze_button.config(state=tk.NORMAL)
-
-    def initialize_backend(self):
-        """Инициализирует тяжелые компоненты в фоне"""
-        # Проверка GPU/CPU
-        import tensorflow as tf
-        devices = tf.config.list_physical_devices()
-        self.image_queue.put(("log", f"Доступные устройства: {devices}\n"))
-
-        # Ленивая загрузка модели при первом анализе
-        # self.image_queue.put(("log", "Модель будет загружена при первом анализе\n"))
-
-        # Обновляем статус
-        self.image_queue.put(("status", "Готов к работе"))
-
-    def create_widgets(self):
-        # Панель управления
+    def _create_widgets(self) -> None:
         self.control_frame = tk.Frame(self.root)
         self.control_frame.pack(fill=tk.X, padx=5, pady=5)
+        self.control_frame.columnconfigure(1, weight=1)
 
-        # Основной контейнер
-        self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL)
-        self.main_paned.pack(fill=tk.BOTH, expand=True)
-
-        # Левая панель (таблица + лог)
-        self.left_paned = tk.PanedWindow(self.main_paned, orient=tk.VERTICAL)
-        self.main_paned.add(self.left_paned, width=950)
-
-        # Правая панель (превью)
-        self.preview_frame = tk.LabelFrame(self.main_paned, text="Превью")
-        self.main_paned.add(self.preview_frame, width=300)
-
-        # Превью изображения
-        # self.preview_frame = tk.LabelFrame(self.main_paned, text="Превью")
-        # self.preview_label = tk.Label(self.preview_frame)
-        # self.preview_label.pack(fill=tk.BOTH, expand=True)
-
-        # Обработчик изменения размера окна (добавьте эти строки)
-        # self.preview_frame.bind("<Configure>", self.resize_preview)
-        # self.root.bind("<Configure>", lambda e: self.resize_preview())
-
-        # # Панель управления
-        # self.control_frame = tk.Frame(self.root)
-        # self.control_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        # Элементы управления
         tk.Label(self.control_frame, text="Папка:").grid(row=0, column=0, padx=5)
         self.path_entry = tk.Entry(self.control_frame, width=50)
-        self.path_entry.grid(row=0, column=1, padx=5, sticky='ew')
+        self.path_entry.grid(row=0, column=1, padx=5, sticky="ew")
 
         self.browse_button = tk.Button(self.control_frame, text="Обзор", command=self.browse_folder)
         self.browse_button.grid(row=0, column=2, padx=5)
 
         tk.Label(self.control_frame, text="Порог:").grid(row=0, column=3, padx=5)
-        self.threshold_slider = tk.Scale(self.control_frame, from_=0.1, to=1.0, resolution=0.01,
-                                         orient=tk.HORIZONTAL, length=200)
+        self.threshold_slider = tk.Scale(
+            self.control_frame,
+            from_=0.1,
+            to=1.0,
+            resolution=0.01,
+            orient=tk.HORIZONTAL,
+            length=180,
+        )
         self.threshold_slider.set(0.7)
         self.threshold_slider.grid(row=0, column=4, padx=5)
 
         tk.Label(self.control_frame, text="Фильтр:").grid(row=0, column=5, padx=5)
-        self.filter_var = tk.StringVar(value="all")
+        self.filter_var = tk.StringVar(value="Все")
         self.filter_combobox = ttk.Combobox(
             self.control_frame,
             textvariable=self.filter_var,
-            values=["Все", "Только НЮ", "Только безопасные", "Неопределённые", "BAD"],  # 👈 добавили BAD
+            values=("Все", "Только НЮ", "Только безопасные", "Неопределённые", "BAD"),
             state="readonly",
-            width=15
+            width=16,
         )
-
-        # self.filter_combobox = ttk.Combobox(self.control_frame, textvariable=self.filter_var,
-        #                                     values=["Все", "Только НЮ", "Только безопасные", "Неопределённые"],
-        #                                     state="readonly", width=15)
         self.filter_combobox.grid(row=0, column=6, padx=5)
+        self.filter_combobox.bind("<<ComboboxSelected>>", self.apply_filter)
 
         self.analyze_button = tk.Button(self.control_frame, text="Анализировать", command=self.toggle_analysis)
         self.analyze_button.grid(row=0, column=7, padx=5)
@@ -165,428 +85,225 @@ class NSFWAnalyzerApp:
             self.control_frame,
             text="Переместить",
             command=self.move_images_by_filter,
-            state=tk.DISABLED
+            state=tk.DISABLED,
         )
         self.move_button.grid(row=0, column=8, padx=5)
 
         tk.Label(self.control_frame, text="Модель:").grid(row=0, column=9, padx=5)
-        self.model_type = tk.StringVar(value="yahoo")
+        self.model_type = tk.StringVar(value=MODEL_CHOICES[0])
         self.model_combobox = ttk.Combobox(
             self.control_frame,
             textvariable=self.model_type,
-            values=["Yahoo NSFW", "MobileNetV2", "GantMan NSFW", "NSFW Hub Detector", "TF Hub Detector"],
+            values=MODEL_CHOICES,
             state="readonly",
-            width=15
+            width=18,
         )
         self.model_combobox.grid(row=0, column=10, padx=5)
 
-        # Таблица результатов
+        self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL)
+        self.main_paned.pack(fill=tk.BOTH, expand=True)
+
+        self.left_paned = tk.PanedWindow(self.main_paned, orient=tk.VERTICAL)
+        self.main_paned.add(self.left_paned, width=1000)
+
         self.tree_frame = tk.Frame(self.left_paned)
-        self.left_paned.add(self.tree_frame, height=500)
+        self.left_paned.add(self.tree_frame, height=520)
 
         self.tree_scroll_y = ttk.Scrollbar(self.tree_frame)
         self.tree_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
-
         self.tree_scroll_x = ttk.Scrollbar(self.tree_frame, orient=tk.HORIZONTAL)
         self.tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
 
-        self.result_tree = ttk.Treeview(self.tree_frame,
-                                        columns=("#", "Имя файла", "Путь", "Размер", "Дата изменения", "Порог", "Статус"),
-                                        show="headings",
-                                        yscrollcommand=self.tree_scroll_y.set,
-                                        xscrollcommand=self.tree_scroll_x.set)
-
+        columns = ("#", "Имя файла", "Путь", "Размер", "Дата изменения", "Оценка", "Статус")
+        self.result_tree = ttk.Treeview(
+            self.tree_frame,
+            columns=columns,
+            show="headings",
+            yscrollcommand=self.tree_scroll_y.set,
+            xscrollcommand=self.tree_scroll_x.set,
+        )
         self.result_tree.pack(fill=tk.BOTH, expand=True)
-
         self.tree_scroll_y.config(command=self.result_tree.yview)
         self.tree_scroll_x.config(command=self.result_tree.xview)
 
-        # Настройка столбцов
-        columns = {
-            "#": {"width": 50, "anchor": "center"},
-            "Имя файла": {"width": 200},
-            "Путь": {"width": 300},
-            "Размер": {"width": 80, "anchor": "e"},
-            "Дата изменения": {"width": 120},
-            "Порог": {"width": 80, "anchor": "center"},
-            "Статус": {"width": 60, "anchor": "center"}
+        column_config = {
+            "#": {"width": 55, "anchor": "center", "stretch": False},
+            "Имя файла": {"width": 220},
+            "Путь": {"width": 420},
+            "Размер": {"width": 90, "anchor": "e"},
+            "Дата изменения": {"width": 135},
+            "Оценка": {"width": 85, "anchor": "center"},
+            "Статус": {"width": 80, "anchor": "center"},
         }
+        for column, config in column_config.items():
+            self.result_tree.heading(
+                column,
+                text=column,
+                command=lambda current=column: self.sort_treeview_column(current, False),
+            )
+            self.result_tree.column(column, **config)
 
-        # for col, params in columns.items():
-        #     self.result_tree.heading(col, text=col)
-        #     self.result_tree.column(col, **params)
+        self.result_tree.tag_configure("nude", background="#ffcccc")
+        self.result_tree.tag_configure("safe", background="#ccffcc")
+        self.result_tree.tag_configure("bad", background="#ffe680")
 
-        for col, params in columns.items():
-            self.result_tree.heading(col, text=col,
-                                     command=lambda c=col: self.sort_treeview_column(c, False))
-            self.result_tree.column(col, **params)
-
-        # Теги для подсветки
-        self.result_tree.tag_configure('nude', background='#ffcccc')
-        self.result_tree.tag_configure('safe', background='#ccffcc')
-
-        # Консоль логов
         self.log_frame = tk.LabelFrame(self.left_paned, text="Лог")
-        self.left_paned.add(self.log_frame, height=200)
-
-        self.log_console = scrolledtext.ScrolledText(self.log_frame)
+        self.left_paned.add(self.log_frame, height=210)
+        self.log_console = scrolledtext.ScrolledText(self.log_frame, height=8)
         self.log_console.pack(fill=tk.BOTH, expand=True)
 
-        # # Превью изображения
-        self.preview_label = tk.Label(self.preview_frame)
+        self.preview_frame = tk.LabelFrame(self.main_paned, text="Превью")
+        self.main_paned.add(self.preview_frame, width=340)
+        self.preview_label = tk.Label(self.preview_frame, text="Выберите изображение")
         self.preview_label.pack(fill=tk.BOTH, expand=True)
 
-        # # Статус бар
-        # status_frame = tk.Frame(self.root)
-        # status_frame.pack(side="bottom", fill="x")
-        # #
-        # self.status_bar = tk.Label(status_frame, text="", anchor="w", width=60)  # фикс ширина
-        # self.status_bar.pack(side="left", padx=5)
-        # #
-        # # self.progress = ttk.Progressbar(status_frame, orient="horizontal", length=300, mode="determinate")
-        # # self.progress.pack(side="right", padx=5)
-        #
-        # self.status_var = tk.StringVar()
-        # self.status_bar = tk.Label(self.root, textvariable=self.status_var, bd=1, relief=tk.SUNKEN, anchor=tk.W)
-        # self.status_bar.pack(fill=tk.X, side=tk.BOTTOM)
-        # #
-        # # # Инициализация прогресс-бара
-        # # # self.progress = ttk.Progressbar(self.status_bar, mode='indeterminate', length=200)
-        # self.progress = ttk.Progressbar(self.status_bar, mode='determinate', length=600, maximum=100)
-        # self.progress.pack(side=tk.RIGHT, padx=5)
-
-        # Создаём контейнер для статуса и прогрессбара
         status_frame = tk.Frame(self.root, bd=1, relief=tk.SUNKEN)
-        status_frame.pack(side="bottom", fill="x")
-
-        # Статус-текст
+        status_frame.pack(side=tk.BOTTOM, fill=tk.X)
         self.status_var = tk.StringVar()
-        self.status_bar = tk.Label(status_frame, textvariable=self.status_var, anchor="w", width=60)
-        self.status_bar.pack(side="left", padx=5)
+        self.status_bar = tk.Label(status_frame, textvariable=self.status_var, anchor="w")
+        self.status_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.progress = ttk.Progressbar(status_frame, mode="determinate", length=320, maximum=1)
+        self.progress.pack(side=tk.RIGHT, padx=5)
 
-        # Прогресс-бар
-        self.progress = ttk.Progressbar(status_frame, mode="determinate", length=300, maximum=100)
-        self.progress.pack(side="right", padx=5)
-
-        # Привязка событий
         self.result_tree.bind("<Double-1>", self.open_image)
-        self.result_tree.bind("<<TreeviewSelect>>", self.show_preview)
-        self.filter_var.trace_add('write', self.apply_filter)
-
-        # Enter – открыть изображение
         self.result_tree.bind("<Return>", self.open_image)
-        # F6 – перемещение
+        self.result_tree.bind("<<TreeviewSelect>>", self.show_preview)
         self.root.bind("<F6>", self.move_selected_file_by_filter)
-        # Del – удалить файл
         self.root.bind("<Delete>", self.delete_selected_file)
 
-        self.result_tree.tag_configure('mobilenet', background='#e0f7ff')
-        self.result_tree.tag_configure('bad', background='#ffe680')
-        self.result_tree.tag_configure('nude', background='#ffcccc')
-        self.result_tree.tag_configure('safe', background='#ccffcc')
+    def _set_scanning(self, active: bool) -> None:
+        state = tk.DISABLED if active else tk.NORMAL
+        self.browse_button.config(state=state)
+        self.path_entry.config(state=state)
+        self.analyze_button.config(state=tk.DISABLED if active else tk.NORMAL)
+        self.filter_combobox.config(state="disabled" if active else "readonly")
 
-    def mark_bad_file(self, img_path):
-        # Находим item в Treeview
-        for item in self.result_tree.get_children():
-            values = list(self.result_tree.item(item)['values'])
-            if values[2] == img_path:
-                # Обновляем в Treeview
-                self.result_tree.set(item, "НЮ", "BAD")
-                self.result_tree.item(item, tags=("bad",))
-                # Обновляем в all_files
-                for i, f in enumerate(self.all_files):
-                    if f[2] == img_path:
-                        updated = list(f)
-                        updated[6] = "BAD"
-                        self.all_files[i] = tuple(updated)
-                        break
-                break
+    def _set_analysis_controls(self, active: bool) -> None:
+        self.browse_button.config(state=tk.DISABLED if active else tk.NORMAL)
+        self.path_entry.config(state=tk.DISABLED if active else tk.NORMAL)
+        self.filter_combobox.config(state="disabled" if active else "readonly")
+        self.threshold_slider.config(state=tk.DISABLED if active else tk.NORMAL)
+        self.model_combobox.config(state="disabled" if active else "readonly")
+        self.analyze_button.config(text="Остановить" if active else "Анализировать", state=tk.NORMAL)
+        if not active:
+            self.move_button.config(state=tk.NORMAL if self.all_files else tk.DISABLED)
 
-    def move_selected_file_by_filter(self, event=None):
-        folder_path = self.path_entry.get()
-        if not folder_path:
-            return
-
-        filter_type = self.filter_var.get()
-        if filter_type == "Только НЮ":
-            target_subfolder = "NU"
-        elif filter_type == "Неопределённые":
-            target_subfolder = "BAD"
-        else:
-            messagebox.showinfo("Инфо", "Перемещение доступно только для фильтров 'Только НЮ' и 'Неопределённые'")
-            return
-
-        selected = self.result_tree.selection()
-        if not selected:
-            return  # ничего не выбрано
-
-        target_folder = os.path.join(folder_path, target_subfolder)
-        os.makedirs(target_folder, exist_ok=True)
-
-        moved_count = 0
-        for item in selected:
-            values = self.result_tree.item(item)['values']
-            img_path = values[2]
-            nude_status = str(values[6]).strip()
-
-            # проверяем статус по фильтру
-            if filter_type == "Только НЮ" and nude_status != "✓":
-                continue
-            if filter_type == "Неопределённые" and nude_status in ("✓", "✗"):
-                continue
-
-            try:
-                filename = os.path.basename(img_path)
-                dst_path = os.path.join(target_folder, filename)
-                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-                os.rename(img_path, dst_path)
-                log_message(f"[MOVE ONE] {img_path} -> {dst_path}\n", self.log_console)
-                self.result_tree.set(item, "Путь", dst_path)
-                moved_count += 1
-            except Exception as e:
-                log_message(f"[ERROR MOVE ONE] {img_path}: {e}\n", self.log_console)
-
-        if moved_count > 0:
-            self.status_var.set(f"Перемещён {moved_count} файл(ов) в {target_folder}")
-
-    def delete_selected_file(self, event=None):
-        selected = self.result_tree.selection()
-        if not selected:
-            return
-        for item in selected:
-            img_path = self.result_tree.item(item)['values'][2]
-            try:
-                os.remove(img_path)
-                log_message(f"[DELETE] {img_path}\n", self.log_console)
-                self.result_tree.delete(item)
-            except Exception as e:
-                log_message(f"[ERROR DELETE] {img_path}: {e}\n", self.log_console)
-
-    def move_images_by_filter(self, *_):
-        folder_path = self.path_entry.get()
-        if not folder_path:
-            return
-
-        filter_type = self.filter_var.get()
-        if filter_type == "Только НЮ":
-            target_subfolder = "NU"
-        elif filter_type == "Неопределённые":
-            target_subfolder = "BAD"
-        else:
-            messagebox.showinfo("Инфо", "Перемещение доступно только для фильтров 'Только НЮ' и 'Неопределённые'")
-            return
-
-        target_folder = os.path.join(folder_path, target_subfolder)
-        os.makedirs(target_folder, exist_ok=True)
-
-        moved_count = 0
-        for item in self.result_tree.get_children():
-            values = self.result_tree.item(item)['values']
-            img_path = values[2]
-            nude_status = str(values[6]).strip()
-            # Логика отбора по фильтру
-            if filter_type == "Только НЮ" and nude_status != "✓":
-                continue
-            if filter_type == "Неопределённые" and nude_status in ("✓", "✗"):
-                continue
-
-            try:
-                filename = os.path.basename(img_path)
-                dst_path = os.path.join(target_folder, filename)
-                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-                os.rename(img_path, dst_path)
-                log_message(f"[MOVE] {img_path} -> {dst_path}\n", self.log_console)
-                self.result_tree.set(item, "Путь", dst_path)
-                moved_count += 1
-            except Exception as e:
-                log_message(f"[ERROR MOVE] {img_path}: {e}\n", self.log_console)
-
-        self.status_var.set(f"Перемещено {moved_count} файлов в {target_folder}")
-        messagebox.showinfo("Готово", f"Перемещено {moved_count} файлов")
-
-    def move_nude_images(self):
-        folder_path = self.path_entry.get()
-        if not folder_path:
-            return
-
-        # Создаем папку NU в корневой директории
-        target_folder = os.path.join(folder_path, "NU")
-        os.makedirs(target_folder, exist_ok=True)
-
-        moved_count = 0
-
-        for item in self.result_tree.get_children():
-            if self.result_tree.set(item, "НЮ") == "✓":
-                src_path = self.result_tree.item(item)['values'][2]
-                rel_path = os.path.relpath(src_path, folder_path)
-                dst_path = os.path.join(target_folder, rel_path)
-
-                # Создаем подпапки если нужно
-                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-
-                try:
-                    shutil.move(src_path, dst_path)
-                    moved_count += 1
-                    # Обновляем путь в таблице
-                    self.result_tree.set(item, "Путь", dst_path)
-                except Exception as e:
-                    log_message(f"Ошибка перемещения {src_path}: {e}\n")
-
-        self.status_var.set(f"Перемещено {moved_count} файлов в {target_folder}")
-        messagebox.showinfo("Готово", f"Перемещено {moved_count} файлов")
-
-    def browse_folder(self):
+    def browse_folder(self) -> None:
         folder_path = filedialog.askdirectory()
         if not folder_path:
             return
 
-        # Очищаем предыдущие результаты
+        self.stop_analysis = False
         self.result_tree.delete(*self.result_tree.get_children())
+        self.all_files.clear()
+        self.preview_label.config(image="", text="Выберите изображение")
+        self.preview_label.image = None
+        self._last_preview_path = None
+
         self.path_entry.delete(0, tk.END)
         self.path_entry.insert(0, folder_path)
-        self.all_files.clear()
+        self.move_button.config(state=tk.DISABLED)
+        self._set_scanning(True)
 
-        # Запускаем сканирование в отдельном потоке
-        threading.Thread(
-            target=self.scan_folder_async,
-            args=(folder_path,),
-            daemon=True
-        ).start()
+        self.scan_thread = threading.Thread(
+            target=scan_folder_async,
+            args=(self, folder_path),
+            daemon=True,
+            name="folder-scan",
+        )
+        self.scan_thread.start()
 
-    def load_images_from_folder(self, folder_path):
-        self.result_tree.delete(*self.result_tree.get_children())
-        if not folder_path:
-            return
-
-        supported_formats = ('.png', '.jpg', '.jpeg', '.bmp', '.gif')
-        file_count = 0
-
-        for root, _, files in os.walk(folder_path):
-            for file in files:
-                if file.lower().endswith(supported_formats):
-                    file_count += 1
-                    img_path = os.path.join(root, file)
-                    stat = os.stat(img_path)
-                    size = self.convert_size(stat.st_size)
-                    mtime = datetime.datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')
-
-                    self.result_tree.insert("", "end", values=(
-                        file_count,
-                        os.path.basename(img_path),
-                        img_path,
-                        size,
-                        mtime,
-                        "",  # Для порога
-                        ""  # Для статуса НЮ
-                    ))
-
-        self.status_var.set(f"Загружено {file_count} изображений")
-
-    def toggle_analysis(self):
-        if self.analyze_button['text'] == 'Анализировать':
-            self.start_analysis()
-        else:
+    def toggle_analysis(self) -> None:
+        if self.analysis_thread and self.analysis_thread.is_alive():
             self.stop_analysis = True
+            self.analyze_button.config(text="Останавливаю...", state=tk.DISABLED)
+            return
+        self.start_analysis()
 
-    def start_analysis(self):
+    def start_analysis(self) -> None:
         if not self.path_entry.get():
             messagebox.showerror("Ошибка", "Выберите папку для анализа")
             return
 
-        try:
-            # Принудительная инициализация перед анализом
-            if not hasattr(self, 'predict_fn'):
-                log_message("⏳ Инициализация модели...\n", self.log_console)
-                self.initialize_model()
+        items: list[tuple[str, str]] = []
+        for item_id in self.result_tree.get_children():
+            values = self.result_tree.item(item_id, "values")
+            if len(values) >= 3:
+                items.append((item_id, str(values[2])))
 
-            model_name = self.model_type.get()
-            log_message(f"🔧 Модель {model_name} готова к работе\n", self.log_console)
-
-        except Exception as e:
-            log_message(f"❌ Критическая ошибка: {str(e)}\n", self.log_console)
-            messagebox.showerror("Ошибка", f"Не удалось инициализировать модель:\n{str(e)}")
+        if not items:
+            messagebox.showinfo("Анализ", "В текущем списке нет изображений")
             return
 
-        # Остальной код метода без изменений
+        threshold = float(self.threshold_slider.get())
+        model_name = self.model_type.get()
         self.stop_analysis = False
-        self.analyze_button.config(text="Остановить")
-        # ...
-        self.analysis_thread = threading.Thread(target=self.analyze_images, daemon=True)
+        self._set_analysis_controls(True)
+        self.progress["value"] = 0
+        self.progress["maximum"] = len(items)
+        self.status_var.set("Подготовка модели...")
+
+        self.analysis_thread = threading.Thread(
+            target=analyze_images,
+            args=(self, items, threshold, model_name),
+            daemon=True,
+            name="image-analysis",
+        )
         self.analysis_thread.start()
 
-    def process_queue(self):
-        if not getattr(self, "running", True):
+    def process_queue(self) -> None:
+        if not self.running:
             return
 
         try:
             while True:
                 task = self.image_queue.get_nowait()
+                event = task[0]
 
-                if isinstance(task, tuple):
-                    if task[0] == "update_item":
-                        item_id = task[1]
-                        values = task[2]
+                if event == "log":
+                    log_message(task[1], self.log_console)
 
-                        # Получаем путь до обновления
-                        try:
-                            tree_values = list(self.result_tree.item(item_id, "values"))
-                            path = tree_values[2]
-                        except Exception:
-                            continue  # строка не найдена
+                elif event == "status":
+                    self.status_var.set(task[1])
 
-                        # Обновляем Treeview
-                        if self.result_tree.winfo_exists():
-                            for col, val in values.items():
-                                try:
-                                    if col == "tag":
-                                        self.result_tree.item(item_id, tags=(val,))
-                                    else:
-                                        self.result_tree.set(item_id, col, val)
-                                except tk.TclError:
-                                    continue  # удалена строка
+                elif event in {"scan_start", "progress_setup"}:
+                    maximum = max(1, int(task[1]))
+                    self.progress["maximum"] = maximum
+                    self.progress["value"] = 0
+                    if event == "scan_start":
+                        self.status_var.set(f"Сканирование... найдено {task[1]} файлов")
 
-                        # Получаем обновлённые значения после вставки
-                        try:
-                            updated_values = list(self.result_tree.item(item_id, "values"))
-                        except Exception:
-                            continue
+                elif event == "scan_batch":
+                    for file_data in task[1]:
+                        row = list(file_data)
+                        self.all_files.append(row)
+                        self._insert_row(row)
 
-                        # Обновляем all_files
-                        for i, file_data in enumerate(self.all_files):
-                            if file_data[2] == path:
-                                self.all_files[i] = updated_values
-                                break
+                elif event == "scan_complete":
+                    count = int(task[1])
+                    self.progress["value"] = count
+                    self.status_var.set(f"Загружено {count} изображений. Готов к анализу")
+                    self._set_scanning(False)
 
-                    elif task[0] == "log":
-                        if self.log_console.winfo_exists():
-                            try:
-                                self.log_console.insert(tk.END, task[1])
-                                self.log_console.see(tk.END)
-                            except tk.TclError:
-                                pass
+                elif event == "scan_cancelled":
+                    self.status_var.set(f"Сканирование остановлено ({task[1]} файлов)")
+                    self._set_scanning(False)
 
-                    elif task[0] == "status":
-                        self.status_var.set(task[1])
+                elif event == "update_item":
+                    self._apply_item_update(task[1], task[2])
 
-                    elif task[0] == "scan_complete":
-                        file_count = task[1]
-                        self.status_var.set(f"Загружено {file_count} изображений. Готов к анализу")
-                        self.progress.stop()
-                        self.analyze_button.config(state=tk.NORMAL)
+                elif event == "progress":
+                    self.progress["value"] = int(task[1])
 
-                    elif task[0] == "analysis_complete":
-                        self.analyze_button.config(text="Анализировать", state=tk.NORMAL)
-                        self.move_button.config(state=tk.NORMAL)
+                elif event == "analysis_complete":
+                    self._set_analysis_controls(False)
+                    self.analysis_thread = None
 
-                    elif task[0] == "progress":
-                        current = task[1]
-                        self.progress["value"] = current
-                        self.progress.update()
-
-                    elif task[0] == "mark_bad":
-                        bad_path = task[1]
-                        self.mark_bad_file(bad_path)
-
+                elif event == "analysis_error":
+                    self._set_analysis_controls(False)
+                    self.analysis_thread = None
+                    self.status_var.set("Ошибка инициализации модели")
+                    messagebox.showerror("Ошибка модели", task[1])
 
         except queue.Empty:
             pass
@@ -594,147 +311,223 @@ class NSFWAnalyzerApp:
         if self.running:
             self.root.after(100, self.process_queue)
 
-    def apply_filter2(self, *args):
-        if getattr(self, "analysis_running", False):
-            messagebox.showwarning("Анализ", "Нельзя менять фильтр во время анализа.")
+    def _insert_row(self, file_data: list | tuple) -> str:
+        status = str(file_data[6]).strip() if len(file_data) > 6 else ""
+        tag = self._status_tag(status)
+        return self.result_tree.insert("", "end", values=file_data, tags=(tag,) if tag else ())
+
+    def _apply_item_update(self, item_id: str, updates: dict[str, str]) -> None:
+        if not self.result_tree.exists(item_id):
             return
 
-        filter_type = self.filter_var.get()
+        values_before = list(self.result_tree.item(item_id, "values"))
+        if len(values_before) < 3:
+            return
+        path = str(values_before[2])
 
-        # Очищаем текущее отображение
+        tag = updates.get("tag")
+        for column, value in updates.items():
+            if column != "tag":
+                self.result_tree.set(item_id, column, value)
+        if tag:
+            self.result_tree.item(item_id, tags=(tag,))
+
+        updated_values = list(self.result_tree.item(item_id, "values"))
+        for index, file_data in enumerate(self.all_files):
+            if str(file_data[2]) == path:
+                self.all_files[index] = updated_values
+                break
+
+    def _status_tag(self, status: str) -> str:
+        if status == "✓":
+            return "nude"
+        if status == "✗":
+            return "safe"
+        if status == "BAD":
+            return "bad"
+        return ""
+
+    def _matches_filter(self, status: str, filter_type: str | None = None) -> bool:
+        current = filter_type or self.filter_var.get()
+        if current == "Все":
+            return True
+        if current == "Только НЮ":
+            return status == "✓"
+        if current == "Только безопасные":
+            return status == "✗"
+        if current == "BAD":
+            return status == "BAD"
+        if current == "Неопределённые":
+            return status not in {"", "✓", "✗", "BAD"}
+        return True
+
+    def apply_filter(self, _event=None) -> None:
         self.result_tree.delete(*self.result_tree.get_children())
-
-        # Отображаем подходящие строки
         for file_data in self.all_files:
-            nude_status = str(file_data[6]).strip()
+            status = str(file_data[6]).strip()
+            if self._matches_filter(status):
+                self._insert_row(file_data)
 
-            if filter_type == "Только НЮ" and nude_status != "✓":
-                continue
-            elif filter_type == "Только безопасные" and nude_status != "✗":
-                continue
-            elif filter_type == "Неопределённые" and nude_status in ("✓", "✗"):
-                continue
+    def sort_treeview_column(self, column: str, reverse: bool) -> None:
+        rows = [(self.result_tree.set(item, column), item) for item in self.result_tree.get_children("")]
 
-            self.result_tree.insert("", "end", values=file_data)
+        def sort_key(entry):
+            value = entry[0]
+            if column in {"#", "Оценка"}:
+                try:
+                    return (0, float(str(value).replace(",", ".")))
+                except ValueError:
+                    return (1, str(value).casefold())
+            return (0, str(value).casefold())
 
-        self.update_highlighting()
+        rows.sort(key=sort_key, reverse=reverse)
+        for position, (_, item) in enumerate(rows):
+            self.result_tree.move(item, "", position)
+        self.result_tree.heading(
+            column,
+            command=lambda: self.sort_treeview_column(column, not reverse),
+        )
 
-    def apply_filter(self, *args):
-        if getattr(self, "analysis_running", False):
-            messagebox.showwarning("Анализ", "Нельзя менять фильтр во время анализа.")
+    def _target_subfolder(self) -> str | None:
+        mapping = {
+            "Только НЮ": "NU",
+            "Неопределённые": "UNKNOWN",
+            "BAD": "BAD",
+        }
+        return mapping.get(self.filter_var.get())
+
+    def move_selected_file_by_filter(self, _event=None) -> None:
+        target_subfolder = self._target_subfolder()
+        if target_subfolder is None:
+            messagebox.showinfo("Инфо", "Для перемещения выберите фильтр НЮ, Неопределённые или BAD")
             return
 
-        filter_type = self.filter_var.get()
-        self.result_tree.delete(*self.result_tree.get_children())
-
-        for file_data in self.all_files:
-            nude_status = str(file_data[6]).strip()
-
-            if filter_type == "Только НЮ" and nude_status != "✓":
-                continue
-            elif filter_type == "Только безопасные" and nude_status != "✗":
-                continue
-            elif filter_type == "Неопределённые" and nude_status in ("✓", "✗", "BAD"):
-                continue
-            elif filter_type == "BAD" and nude_status != "BAD":  # 👈 новый фильтр
-                continue
-
-            self.result_tree.insert("", "end", values=file_data)
-
-        self.update_highlighting()
-
-    def restore_all_items(self):
-        """Восстанавливает все элементы в Treeview"""
-        children = self.result_tree.get_children()
-        for item in children:
-            self.result_tree.reattach(item, '', 'end')
-
-    def update_highlighting(self):
-        """Обновляет подсветку всех видимых элементов"""
-        for item in self.result_tree.get_children():
-            nude_status = self.result_tree.set(item, "Статус")
-            tags = ('nude',) if nude_status == "✓" else ('safe',) if nude_status == "✗" else ()
-            self.result_tree.item(item, tags=tags)
-
-    def open_image(self, event):
-        selected_item = self.result_tree.selection()
-        if selected_item:
-            img_path = self.result_tree.item(selected_item[0])['values'][2]
-            try:
-                if sys.platform.startswith('win'):
-                    os.startfile(img_path)
-                elif sys.platform.startswith('darwin'):
-                    subprocess.call(('open', img_path))
-                else:
-                    subprocess.call(('xdg-open', img_path))
-            except Exception as e:
-                messagebox.showerror("Ошибка", f"Не удалось открыть изображение: {e}")
-
-    def show_preview(self, event=None):
-        # получаем выбранный элемент
         selected = self.result_tree.selection()
         if not selected:
             return
-        item = selected[0]
-        img_path = self.result_tree.item(item)['values'][2]
+        self._move_items(selected, target_subfolder)
 
-        # сохраняем путь, чтобы не терять при ресайзе (если вдруг понадобится)
-        self._last_preview_path = img_path
+    def move_images_by_filter(self) -> None:
+        target_subfolder = self._target_subfolder()
+        if target_subfolder is None:
+            messagebox.showinfo("Инфо", "Для перемещения выберите фильтр НЮ, Неопределённые или BAD")
+            return
 
+        visible = self.result_tree.get_children()
+        if not visible:
+            return
+        self._move_items(visible, target_subfolder)
+
+    def _move_items(self, item_ids, target_subfolder: str) -> None:
+        base = Path(self.path_entry.get()).resolve()
+        target_root = base / target_subfolder
+        moved = 0
+
+        for item_id in item_ids:
+            if not self.result_tree.exists(item_id):
+                continue
+            values = list(self.result_tree.item(item_id, "values"))
+            if len(values) < 7:
+                continue
+
+            status = str(values[6]).strip()
+            if not self._matches_filter(status):
+                continue
+
+            source = Path(str(values[2])).resolve()
+            try:
+                relative = source.relative_to(base)
+            except ValueError:
+                relative = Path(source.name)
+
+            destination = target_root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination = self._unique_destination(destination)
+
+            try:
+                shutil.move(str(source), str(destination))
+                self._replace_path(str(source), str(destination))
+                self.result_tree.set(item_id, "Путь", str(destination))
+                log_message(f"[MOVE] {source} -> {destination}\n", self.log_console)
+                moved += 1
+            except OSError as exc:
+                log_message(f"[ERROR MOVE] {source}: {exc}\n", self.log_console)
+
+        self.status_var.set(f"Перемещено {moved} файлов в {target_root}")
+        if moved:
+            messagebox.showinfo("Готово", f"Перемещено {moved} файлов")
+
+    def _unique_destination(self, destination: Path) -> Path:
+        if not destination.exists():
+            return destination
+        for index in range(1, 10_000):
+            candidate = destination.with_name(f"{destination.stem}__{index}{destination.suffix}")
+            if not candidate.exists():
+                return candidate
+        raise RuntimeError(f"Не удалось подобрать свободное имя для {destination}")
+
+    def _replace_path(self, old_path: str, new_path: str) -> None:
+        for file_data in self.all_files:
+            if str(file_data[2]) == old_path:
+                file_data[2] = new_path
+                file_data[1] = Path(new_path).name
+                return
+
+    def delete_selected_file(self, _event=None) -> None:
+        selected = self.result_tree.selection()
+        if not selected:
+            return
+
+        for item_id in selected:
+            values = self.result_tree.item(item_id, "values")
+            if len(values) < 3:
+                continue
+            img_path = str(values[2])
+            try:
+                Path(img_path).unlink()
+                self.all_files = [row for row in self.all_files if str(row[2]) != img_path]
+                self.result_tree.delete(item_id)
+                log_message(f"[DELETE] {img_path}\n", self.log_console)
+            except OSError as exc:
+                log_message(f"[ERROR DELETE] {img_path}: {exc}\n", self.log_console)
+
+    def open_image(self, _event=None) -> None:
+        selected = self.result_tree.selection()
+        if not selected:
+            return
+        img_path = str(self.result_tree.item(selected[0], "values")[2])
         try:
-            img = Image.open(img_path)
-            preview_width = self.preview_frame.winfo_width() - 20
-            preview_height = self.preview_frame.winfo_height() - 20
-            scale = min(preview_width / img.width, preview_height / img.height)
-            new_size = (int(img.width * scale), int(img.height * scale))
-            img = img.resize(new_size, Image.Resampling.LANCZOS)
+            if sys.platform.startswith("win"):
+                os.startfile(img_path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(("open", img_path))
+            else:
+                subprocess.Popen(("xdg-open", img_path))
+        except OSError as exc:
+            messagebox.showerror("Ошибка", f"Не удалось открыть изображение: {exc}")
 
-            tk_img = ImageTk.PhotoImage(img)
-            self.preview_label.config(image=tk_img, text="")  # сбрасываем текст
-            self.preview_label.image = tk_img
-        except Exception as e:
-            self.preview_label.config(image=None, text="Не удалось загрузить изображение")
-            print(f"Ошибка загрузки превью: {e}")
+    def show_preview(self, _event=None) -> None:
+        selected = self.result_tree.selection()
+        if not selected:
+            return
 
-    # def resize_preview(self, event=None):
-    #     # Перерисовываем только если есть текущая картинка
-    #     if hasattr(self, "_last_preview_path") and self._last_preview_path:
-    #         try:
-    #             img = Image.open(self._last_preview_path)
-    #             preview_width = self.preview_frame.winfo_width() - 20
-    #             preview_height = self.preview_frame.winfo_height() - 20
-    #             scale = min(preview_width / img.width, preview_height / img.height)
-    #             new_size = (int(img.width * scale), int(img.height * scale))
-    #             img = img.resize(new_size, Image.Resampling.LANCZOS)
-    #             tk_img = ImageTk.PhotoImage(img)
-    #             self.preview_label.config(image=tk_img)
-    #             self.preview_label.image = tk_img
-    #         except Exception as e:
-    #             print(f"Ошибка ресайза превью: {e}")
+        img_path = str(self.result_tree.item(selected[0], "values")[2])
+        self._last_preview_path = img_path
+        try:
+            with Image.open(img_path) as image:
+                image = image.convert("RGB")
+                preview_width = max(1, self.preview_frame.winfo_width() - 20)
+                preview_height = max(1, self.preview_frame.winfo_height() - 20)
+                image.thumbnail((preview_width, preview_height), Image.Resampling.LANCZOS)
+                tk_image = ImageTk.PhotoImage(image.copy())
+            self.preview_label.config(image=tk_image, text="")
+            self.preview_label.image = tk_image
+        except (OSError, ValueError) as exc:
+            self.preview_label.config(image="", text="Не удалось загрузить изображение")
+            self.preview_label.image = None
+            log_message(f"[PREVIEW] {img_path}: {exc}\n", self.log_console)
 
-    def on_close(self):
+    def on_close(self) -> None:
         self.running = False
         self.stop_analysis = True
-
-        # Выгружаем модели из памяти
-        if hasattr(self, 'n2'):
-            del self.n2
-        if hasattr(self, 'mobilenet_model'):
-            del self.mobilenet_model
-        if hasattr(self, 'tfhub_model'):
-            del self.tfhub_model
-
-        self.running = False  # останавливает process_queue
-        self.stop_analysis = True  # остановить анализ
-
-        # Очистка очереди ДО закрытия окна
-        with self.image_queue.mutex:
-            self.image_queue.queue.clear()
-
-        # Ждём завершение анализа, если он ещё выполняется
-        if self.analysis_thread and self.analysis_thread.is_alive():
-            print("⏳ Ожидаем завершение анализа...")
-            self.analysis_thread.join(timeout=3)
-
-        # Теперь можно безопасно уничтожить окно
         self.root.destroy()
