@@ -5,3 +5,4 @@ __pycache__/
 *_tmp/
 
 nsfw_model_mobilenet_v2/
+nsfw_model.zip
