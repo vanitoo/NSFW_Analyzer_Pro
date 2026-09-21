@@ -52,11 +52,33 @@ OpenNSFW2 0.19+ используется через Keras 3 backend. TensorFlow 
 - **Marqo Fast** — при первом анализе скачивает веса с Hugging Face; дальше использует локальный cache;
 - **Freepik 4-Level** — аналогично, скачивает веса с Hugging Face при первом анализе;
 - **Yahoo/OpenNSFW2** — веса скачиваются при первом фактическом предсказании, если их ещё нет;
-- **GantMan** — при первом анализе скачивается официальный release 1.2.0 (~100 MB); из него используется готовый `saved_model.tflite`, который затем хранится в `~/.cache/nsfw-analyzer-pro/gantman/1.2.0`;
+- **GantMan** — при первом анализе скачивается официальный release 1.2.0 (~100 MB); из него используется готовый `saved_model.tflite`, который затем хранится в `.cache/gantman/1.2.0`;
 - **NSFW Hub** — скачивается TensorFlow Hub при первом анализе;
 - **NudeNet 320n** — веса уже входят в пакет `nudenet`, поэтому отдельной загрузки при анализе нет.
 
-Hugging Face cache для приложения хранится в `~/.cache/nsfw-analyzer-pro/huggingface`; TensorFlow Hub и OpenNSFW2 также используют подпапки `~/.cache/nsfw-analyzer-pro`. Поэтому после первого запуска веса повторно не скачиваются, пока cache не удалён.
+Все скачиваемые модели теперь хранятся **в папке проекта**:
+
+```text
+.cache/
+├── downloads/     # исходные архивы, например GantMan
+├── gantman/       # распакованная GantMan TFLite
+├── huggingface/   # Marqo / Freepik
+├── opennsfw2/     # Yahoo/OpenNSFW2 weights
+└── tfhub/         # TensorFlow Hub
+```
+
+Каталог `.cache/` добавлен в `.gitignore` и не попадает в репозиторий. При первом запуске после обновления приложение пытается перенести ранее скачанные файлы из старого `~/.cache/nsfw-analyzer-pro` в локальный cache проекта, поэтому повторная загрузка обычно не нужна.
+
+Для OpenNSFW2 используется явный путь `.cache/opennsfw2/open_nsfw_weights.h5`, без дополнительного вложенного `.opennsfw2/weights`.
+
+Путь к cache можно переопределить переменной окружения:
+
+```bat
+set NSFW_ANALYZER_CACHE_DIR=D:\AI_MODELS\nsfw-cache
+START_NVIDIA.cmd
+```
+
+Если `NSFW_ANALYZER_CACHE_DIR` задана, автоматическая миграция старого cache отключается. Активный каталог cache выводится в лог при инициализации модели.
 
 ## NVIDIA GPU
 
@@ -144,7 +166,9 @@ nsfw-analyzer
 │   ├── analyzer.py            # маршрутизация моделей и анализ
 │   ├── models_legacy.py       # Yahoo/GantMan/TF runtime helpers
 │   ├── models_extra.py        # Marqo / Freepik / NudeNet
+│   ├── paths.py               # единые пути project-local cache
 │   └── utils.py               # общие утилиты и логирование
+├── .cache/                     # локальный cache моделей (gitignored)
 ├── requirements.txt           # базовые зависимости
 ├── requirements-models.txt    # Marqo / Freepik / NudeNet
 ├── pyproject.toml             # метаданные пакета и Ruff
@@ -156,6 +180,11 @@ nsfw-analyzer
 
 ## Что изменено в 2.4
 
+- весь внешний cache моделей перенесён из профиля пользователя в `<проект>/.cache`;
+- добавлен единый `src/paths.py` для путей Hugging Face, TF Hub, OpenNSFW2 и GantMan;
+- добавлена best-effort миграция ранее скачанного cache из `~/.cache/nsfw-analyzer-pro`;
+- OpenNSFW2 получает явный путь к `open_nsfw_weights.h5`, без лишнего вложения `.opennsfw2/weights`;
+- путь можно переопределить через `NSFW_ANALYZER_CACHE_DIR`;
 - рабочие модули перенесены из корня в пакет `src/`; в корне оставлен только `main.py`;
 - удалены архивные каталоги `v1/` и `v3/`;
 - импорты переведены на пакетные относительные импорты, а packaging обновлён под новую структуру;
