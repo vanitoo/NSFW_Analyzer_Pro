@@ -2,7 +2,7 @@
 
 **NSFW Analyzer Pro** — локальное настольное приложение на Python/Tkinter для пакетного анализа изображений и сортировки потенциально NSFW-контента.
 
-Текущая версия: **2.3.0**.
+Текущая версия: **2.4.0**.
 
 ## Возможности
 
@@ -26,7 +26,7 @@
 | Marqo Fast | Лёгкий ViT-классификатор SFW/NSFW (~22 MB); PyTorch, CUDA auto |
 | Freepik 4-Level | EVA-классификатор `neutral / low / medium / high` (~173 MB); PyTorch, CUDA auto |
 | NudeNet Detector | YOLOv8/ONNX detector открытых частей тела; возвращает классы детекций |
-| GantMan NSFW | Категории `drawings / hentai / neutral / porn / sexy`; TensorFlow/Keras |
+| GantMan NSFW | Официальный GantMan 1.2.0 `saved_model.tflite`; категории `drawings / hentai / neutral / porn / sexy`; TensorFlow Lite CPU |
 | NSFW Hub Detector | NSFW-классификатор из TensorFlow Hub |
 
 Обычный ImageNet MobileNetV2 и общий OpenImages TF Hub backend удалены из выбора: они не являются NSFW-классификаторами и давали несопоставимые с остальными моделями результаты.
@@ -36,10 +36,10 @@
 ## Требования
 
 - Python 3.11+
-- TensorFlow 2.16+
-- Keras 3
+- TensorFlow **2.20.0**
+- Keras 3.10+
 
-OpenNSFW2 0.19+ используется через Keras 3 backend.
+OpenNSFW2 0.19+ используется через Keras 3 backend. TensorFlow закреплён на 2.20.0 — той же ветке runtime, которую использует актуальная конфигурация OpenNSFW2.
 
 Дополнительные модели используют PyTorch/Transformers/timm/NudeNet. Они перечислены в `requirements-models.txt`.
 
@@ -52,7 +52,7 @@ OpenNSFW2 0.19+ используется через Keras 3 backend.
 - **Marqo Fast** — при первом анализе скачивает веса с Hugging Face; дальше использует локальный cache;
 - **Freepik 4-Level** — аналогично, скачивает веса с Hugging Face при первом анализе;
 - **Yahoo/OpenNSFW2** — веса скачиваются при первом фактическом предсказании, если их ещё нет;
-- **GantMan** — скачивается и распаковывается при первом анализе;
+- **GantMan** — при первом анализе скачивается официальный release 1.2.0 (~100 MB); из него используется готовый `saved_model.tflite`, который затем хранится в `~/.cache/nsfw-analyzer-pro/gantman/1.2.0`;
 - **NSFW Hub** — скачивается TensorFlow Hub при первом анализе;
 - **NudeNet 320n** — веса уже входят в пакет `nudenet`, поэтому отдельной загрузки при анализе нет.
 
@@ -66,11 +66,13 @@ Hugging Face cache для приложения хранится в `~/.cache/nsf
 START_NVIDIA.cmd
 ```
 
-Скрипт устанавливает CUDA-сборку PyTorch и затем остальные зависимости. **Marqo Fast** и **Freepik 4-Level** автоматически используют CUDA, если `torch.cuda.is_available()` возвращает `True`. В логе приложения показывается фактически выбранное устройство и название GPU.
+`START_NVIDIA.cmd` устанавливает CUDA 12.8-сборку PyTorch и `onnxruntime-gpu==1.26.0` для CUDA 12.x. **Marqo Fast** и **Freepik 4-Level** автоматически используют CUDA, если `torch.cuda.is_available()` возвращает `True`. В логе приложения показывается фактически выбранное устройство и название GPU.
 
-NudeNet работает через ONNX Runtime. По умолчанию пакет использует CPU; если установлен совместимый `onnxruntime-gpu` и доступен `CUDAExecutionProvider`, приложение автоматически переключает NudeNet на CUDA.
+NudeNet работает через ONNX Runtime. NVIDIA-скрипт заменяет CPU-пакет `onnxruntime` на GPU-сборку и приложение автоматически выбирает `CUDAExecutionProvider`, если он доступен.
 
-Важно для Windows: TensorFlow 2.11+ больше не поддерживает CUDA на native Windows. Поэтому Yahoo/GantMan/NSFW Hub с текущим TensorFlow обычно работают на CPU под обычным Windows. Для TensorFlow + NVIDIA официальный путь — WSL2. PyTorch-модели Marqo/Freepik этой проблемы на native Windows не имеют.
+**GantMan 1.2.0 теперь не использует legacy SavedModel/Keras:** приложение запускает официальный `saved_model.tflite` через TensorFlow Lite/XNNPACK на CPU. Это устраняет зависимость GantMan от старого Keras SavedModel API, но не добавляет ему CUDA на native Windows.
+
+Важно для Windows: TensorFlow 2.11+ больше не поддерживает CUDA на native Windows. Поэтому Yahoo и NSFW Hub с TensorFlow 2.20.0 обычно работают на CPU под обычным Windows. Для TensorFlow + NVIDIA официальный путь — WSL2. PyTorch-модели Marqo/Freepik и ONNX-модель NudeNet этой проблемы на native Windows не имеют.
 
 ## Быстрый запуск в Windows
 
@@ -104,6 +106,7 @@ source .venv/bin/activate
 
 ```bash
 python -m pip install -r requirements.txt
+python -m pip install -r requirements-models.txt
 python main.py
 ```
 
@@ -136,7 +139,9 @@ nsfw-analyzer
 ├── main.py           # точка входа и console script
 ├── ui.py             # Tkinter UI; вся работа с Tk выполняется в main thread
 ├── scanner.py        # фоновое сканирование файлов
-├── analyzer.py       # модели и многопоточный анализ
+├── analyzer.py       # маршрутизация моделей и многопоточный анализ
+├── models_legacy.py  # Yahoo/GantMan/TF runtime helpers; GantMan TFLite
+├── models_extra.py   # Marqo / Freepik / NudeNet
 ├── utils.py          # общие утилиты и логирование
 ├── requirements.txt         # базовые зависимости
 ├── requirements-models.txt  # Marqo / Freepik / NudeNet
@@ -146,6 +151,15 @@ nsfw-analyzer
 ├── v1/               # архив ранней реализации
 └── v3/               # экспериментальный рефакторинг
 ```
+
+## Что изменено в 2.4
+
+- TensorFlow закреплён на **2.20.0** вместо широкого диапазона версий;
+- GantMan переведён с legacy Keras `TFSMLayer`/SavedModel на официальный `saved_model.tflite` из release 1.2.0;
+- GantMan больше не скачивает плавающий `master.zip`: используется фиксированный официальный release;
+- TensorFlow больше не импортируется при старте `analyzer.py`; он загружается лениво только для соответствующих backend'ов;
+- NVIDIA launcher устанавливает `onnxruntime-gpu==1.26.0` для CUDA 12.x и проверяет доступные ONNX providers;
+- NudeNet предварительно загружает CUDA/cuDNN DLLs ONNX Runtime, когда это поддерживается.
 
 ## Что изменено в 2.3
 
@@ -168,6 +182,10 @@ nsfw-analyzer
 - исправлен `pyproject.toml`: команда `nsfw-analyzer` теперь указывает на существующую `main()`;
 - `requirements.txt` и `pyproject.toml` синхронизированы;
 - удалён накопившийся дублированный рабочий код из root-модулей.
+
+## Лицензии сторонних моделей
+
+Код NSFW Analyzer Pro распространяется под MIT, но сторонние модели и библиотеки имеют собственные лицензии. В частности, у NudeNet есть несогласованность метаданных: его `setup.py` указывает MIT, тогда как файл `LICENSE` в репозитории содержит GNU AGPL-3.0. Перед распространением сборки, особенно коммерческим, проверьте требования лицензий используемых моделей и зависимостей.
 
 ## Лицензия
 
