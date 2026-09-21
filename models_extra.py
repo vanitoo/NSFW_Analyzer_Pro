@@ -138,6 +138,12 @@ def _initialize_nudenet(self: Any, log: Callable[[Any, str], None]) -> None:
         ) from exc
 
     log(self, "[NudeNet] Модель 320n входит в пакет; отдельная загрузка весов не нужна.\n")
+    if hasattr(ort, "preload_dlls"):
+        try:
+            ort.preload_dlls()
+        except Exception:
+            pass
+
     detector = NudeDetector()
     providers = ort.get_available_providers()
     compute_device = "CPU / ONNX Runtime"
