@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import os
-import shutil
 import threading
 import time
-import urllib.request
-import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -14,9 +11,8 @@ _CACHE_DIR = Path.home() / ".cache" / "nsfw-analyzer-pro"
 os.environ.setdefault("TFHUB_CACHE_DIR", str(_CACHE_DIR / "tfhub"))
 os.environ.setdefault("OPENNSFW2_HOME", str(_CACHE_DIR / "opennsfw2"))
 
-import keras
 import numpy as np
-import tensorflow as tf
+from PIL import Image
 
 from models_extra import (
     MODEL_FREEPIK,
@@ -25,6 +21,7 @@ from models_extra import (
     initialize_extra_model,
     release_extra_model,
 )
+from models_legacy import initialize_gantman, tensorflow_device_name
 from utils import get_cpu_cores
 
 MODEL_YAHOO = "Yahoo NSFW"
@@ -38,14 +35,6 @@ MODEL_CHOICES = (
     MODEL_GANTMAN,
     MODEL_HUB,
 )
-
-_MODEL_URL = "https://github.com/GantMan/nsfw_model/archive/refs/heads/master.zip"
-_GANTMAN_DIR = Path("nsfw_model_mobilenet_v2")
-_GANTMAN_SAVED_MODEL = _GANTMAN_DIR / "mobilenet_v2_140_224"
-_GANTMAN_ZIP = Path("nsfw_model.zip")
-_GANTMAN_TMP = Path("gantman_tmp")
-_GANTMAN_LABELS = ("drawings", "hentai", "neutral", "porn", "sexy")
-_GANTMAN_UNSAFE = (1, 3, 4)
 
 
 def _emit(self: Any, event: str, *payload: Any) -> None:
@@ -74,23 +63,11 @@ def _normalize_model_name(model_name: str) -> str:
     raise ValueError(f"Неизвестная модель: {model_name}")
 
 
-def _decode_image(img_path: str, size: tuple[int, int] = (224, 224)) -> tf.Tensor:
-    """Decode JPEG/PNG/BMP/GIF (first frame) into a resized RGB tensor."""
-    raw = tf.io.read_file(img_path)
-    image = tf.io.decode_image(raw, channels=3, expand_animations=False)
-    image.set_shape((None, None, 3))
-    return tf.image.resize(image, size)
-
-
-def _safe_extract_zip(archive: Path, destination: Path) -> None:
-    destination.mkdir(parents=True, exist_ok=True)
-    destination_resolved = destination.resolve()
-    with zipfile.ZipFile(archive, "r") as zip_ref:
-        for member in zip_ref.infolist():
-            target = (destination / member.filename).resolve()
-            if os.path.commonpath((destination_resolved, target)) != str(destination_resolved):
-                raise RuntimeError(f"Небезопасный путь в архиве: {member.filename}")
-        zip_ref.extractall(destination)
+def _decode_image(img_path: str, size: tuple[int, int] = (224, 224)) -> np.ndarray:
+    """Decode a supported image with Pillow without importing TensorFlow."""
+    with Image.open(img_path) as image:
+        image = image.convert("RGB").resize((size[1], size[0]), Image.Resampling.BILINEAR)
+        return np.asarray(image, dtype=np.float32)
 
 
 def initialize_model(self: Any, model_name: str) -> None:
@@ -125,20 +102,17 @@ def initialize_model(self: Any, model_name: str) -> None:
                 initialize_extra_model(self, normalized, _log)
 
             elif normalized == "gantman":
-                _initialize_gantman(self)
-                gpu_devices = tf.config.list_physical_devices("GPU")
-                self.compute_device = f"TensorFlow GPU: {gpu_devices[0].name}" if gpu_devices else "TensorFlow CPU"
-                self.inference_workers = 1 if gpu_devices else 2
+                initialize_gantman(self, _log)
 
             elif normalized == "nsfw_hub":
+                import tensorflow as tf
                 import tensorflow_hub as hub
 
                 self.model = hub.load("https://tfhub.dev/GourmetAI/nsfw_classifier/1")
 
                 def predict_hub(path: str) -> tuple[float, str | None]:
-                    image = _decode_image(path)
-                    image = tf.cast(image, tf.float32) / 255.0
-                    image = tf.expand_dims(image, axis=0)
+                    image = _decode_image(path) / 255.0
+                    image = tf.convert_to_tensor(image[None, ...], dtype=tf.float32)
                     outputs = self.model(image)
                     if isinstance(outputs, dict):
                         preds = np.asarray(next(iter(outputs.values()))).reshape(-1)
@@ -150,14 +124,10 @@ def initialize_model(self: Any, model_name: str) -> None:
                     return score, None
 
                 self.predict_fn = predict_hub
-                gpu_devices = tf.config.list_physical_devices("GPU")
-                self.compute_device = f"TensorFlow GPU: {gpu_devices[0].name}" if gpu_devices else "TensorFlow CPU"
-                self.inference_workers = 1 if gpu_devices else 2
+                self.compute_device, self.inference_workers = tensorflow_device_name()
 
             if normalized == "yahoo":
-                gpu_devices = tf.config.list_physical_devices("GPU")
-                self.compute_device = f"TensorFlow GPU: {gpu_devices[0].name}" if gpu_devices else "TensorFlow CPU"
-                self.inference_workers = 1 if gpu_devices else 2
+                self.compute_device, self.inference_workers = tensorflow_device_name()
 
             _log(self, f"[{model_name}] ✅ Модель готова | устройство: {self.compute_device}\n")
         except Exception:
@@ -165,46 +135,6 @@ def initialize_model(self: Any, model_name: str) -> None:
             self.predict_fn = None
             self.model_name = None
             raise
-
-
-def _initialize_gantman(self: Any) -> None:
-    if not _GANTMAN_SAVED_MODEL.exists():
-        _GANTMAN_DIR.mkdir(parents=True, exist_ok=True)
-        if not _GANTMAN_ZIP.exists():
-            _log(self, "[GantMan] Скачиваем модель (~90 MB)...\n")
-            urllib.request.urlretrieve(_MODEL_URL, _GANTMAN_ZIP)
-
-        if _GANTMAN_TMP.exists():
-            shutil.rmtree(_GANTMAN_TMP)
-        _log(self, "[GantMan] Распаковываем модель...\n")
-        _safe_extract_zip(_GANTMAN_ZIP, _GANTMAN_TMP)
-
-        source = _GANTMAN_TMP / "nsfw_model-master" / "mobilenet_v2_140_224"
-        if not source.exists():
-            raise RuntimeError("В архиве GantMan не найден SavedModel")
-        shutil.move(str(source), str(_GANTMAN_SAVED_MODEL))
-        shutil.rmtree(_GANTMAN_TMP, ignore_errors=True)
-
-    self.model = keras.layers.TFSMLayer(str(_GANTMAN_SAVED_MODEL), call_endpoint="serving_default")
-
-    def predict_gantman(path: str) -> tuple[float, str | None]:
-        image = _decode_image(path)
-        image = tf.cast(image, tf.float32) / 255.0
-        image = tf.expand_dims(image, axis=0)
-        outputs = self.model(image)
-        if isinstance(outputs, dict):
-            scores = np.asarray(next(iter(outputs.values()))).reshape(-1)
-        else:
-            scores = np.asarray(outputs).reshape(-1)
-        if scores.size < len(_GANTMAN_LABELS):
-            raise RuntimeError(f"Неожиданный размер выхода GantMan: {scores.shape}")
-
-        label_index = int(np.argmax(scores[: len(_GANTMAN_LABELS)]))
-        label = _GANTMAN_LABELS[label_index]
-        unsafe_score = float(max(scores[index] for index in _GANTMAN_UNSAFE))
-        return unsafe_score, label
-
-    self.predict_fn = predict_gantman
 
 
 def is_nude_image(
@@ -220,7 +150,7 @@ def is_nude_image(
             raise RuntimeError("Модель не инициализирована")
         score, category = self.predict_fn(img_path)
         return score, score >= threshold, None, category
-    except (OSError, ValueError, tf.errors.OpError) as exc:
+    except (OSError, ValueError) as exc:
         _log(self, f"[SKIP] Не удалось обработать {img_path}: {exc}\n")
         return 0.0, None, "BAD", None
     except Exception as exc:
