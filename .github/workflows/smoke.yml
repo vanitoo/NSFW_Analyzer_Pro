@@ -29,3 +29,7 @@ jobs:
           test ! -e ui.py
           test ! -e v1
           test ! -e v3
+
+      - name: Verify cache layout
+        run: |
+          python -c "from pathlib import Path; from src.paths import CACHE_DIR, PROJECT_ROOT; expected=(Path.cwd()/'.cache').resolve(); assert PROJECT_ROOT==Path.cwd().resolve(); assert CACHE_DIR==expected; print('cache:', CACHE_DIR)"
