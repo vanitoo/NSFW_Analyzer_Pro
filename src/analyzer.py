@@ -17,7 +17,7 @@ from .models_extra import (
     release_extra_model,
 )
 from .models_legacy import initialize_gantman, tensorflow_device_name
-from .paths import OPENNSFW2_WEIGHTS
+from .paths import CACHE_DIR, OPENNSFW2_WEIGHTS
 from .utils import get_cpu_cores
 
 MODEL_YAHOO = "Yahoo NSFW"
@@ -86,6 +86,7 @@ def initialize_model(self: Any, model_name: str) -> None:
         self.compute_device = "CPU"
         self.inference_workers = 2
         _log(self, f"Инициализация модели: {model_name}\n")
+        _log(self, f"Кэш моделей: {CACHE_DIR}\n")
 
         try:
             if normalized == "yahoo":
