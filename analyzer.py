@@ -14,12 +14,26 @@ import keras
 import numpy as np
 import tensorflow as tf
 
+from models_extra import (
+    MODEL_FREEPIK,
+    MODEL_MARQO,
+    MODEL_NUDENET,
+    initialize_extra_model,
+    release_extra_model,
+)
 from utils import get_cpu_cores
 
 MODEL_YAHOO = "Yahoo NSFW"
 MODEL_GANTMAN = "GantMan NSFW"
 MODEL_HUB = "NSFW Hub Detector"
-MODEL_CHOICES = (MODEL_YAHOO, MODEL_GANTMAN, MODEL_HUB)
+MODEL_CHOICES = (
+    MODEL_YAHOO,
+    MODEL_MARQO,
+    MODEL_FREEPIK,
+    MODEL_NUDENET,
+    MODEL_GANTMAN,
+    MODEL_HUB,
+)
 
 _MODEL_URL = "https://github.com/GantMan/nsfw_model/archive/refs/heads/master.zip"
 _GANTMAN_DIR = Path("nsfw_model_mobilenet_v2")
@@ -43,6 +57,12 @@ def _normalize_model_name(model_name: str) -> str:
     name = model_name.strip().lower()
     if "yahoo" in name:
         return "yahoo"
+    if "marqo" in name:
+        return "marqo"
+    if "freepik" in name:
+        return "freepik"
+    if "nudenet" in name:
+        return "nudenet"
     if "gantman" in name:
         return "gantman"
     if "nsfw hub" in name:
@@ -82,9 +102,12 @@ def initialize_model(self: Any, model_name: str) -> None:
         if getattr(self, "model_name", None) == normalized and getattr(self, "predict_fn", None) is not None:
             return
 
+        release_extra_model(self)
         self.model = None
         self.predict_fn = None
         self.model_name = normalized
+        self.compute_device = "CPU"
+        self.inference_workers = 2
         _log(self, f"Инициализация модели: {model_name}\n")
 
         try:
@@ -94,8 +117,14 @@ def initialize_model(self: Any, model_name: str) -> None:
                 self.model = opennsfw2
                 self.predict_fn = lambda path: (float(opennsfw2.predict_image(path)), None)
 
+            elif normalized in {"marqo", "freepik", "nudenet"}:
+                initialize_extra_model(self, normalized, _log)
+
             elif normalized == "gantman":
                 _initialize_gantman(self)
+                gpu_devices = tf.config.list_physical_devices("GPU")
+                self.compute_device = f"TensorFlow GPU: {gpu_devices[0].name}" if gpu_devices else "TensorFlow CPU"
+                self.inference_workers = 1 if gpu_devices else 2
 
             elif normalized == "nsfw_hub":
                 import tensorflow_hub as hub
@@ -117,8 +146,16 @@ def initialize_model(self: Any, model_name: str) -> None:
                     return score, None
 
                 self.predict_fn = predict_hub
+                gpu_devices = tf.config.list_physical_devices("GPU")
+                self.compute_device = f"TensorFlow GPU: {gpu_devices[0].name}" if gpu_devices else "TensorFlow CPU"
+                self.inference_workers = 1 if gpu_devices else 2
 
-            _log(self, f"[{model_name}] ✅ Модель готова к работе\n")
+            if normalized == "yahoo":
+                gpu_devices = tf.config.list_physical_devices("GPU")
+                self.compute_device = f"TensorFlow GPU: {gpu_devices[0].name}" if gpu_devices else "TensorFlow CPU"
+                self.inference_workers = 1 if gpu_devices else 2
+
+            _log(self, f"[{model_name}] ✅ Модель готова | устройство: {self.compute_device}\n")
         except Exception:
             self.model = None
             self.predict_fn = None
@@ -201,7 +238,10 @@ def analyze_images(
         return
 
     start_total = time.perf_counter()
-    max_workers = max(1, min(8, get_cpu_cores(), total_items))
+    max_workers = max(
+        1,
+        min(int(getattr(self, "inference_workers", 2)), get_cpu_cores(), total_items),
+    )
 
     try:
         initialize_model(self, model_name)
@@ -210,7 +250,11 @@ def analyze_images(
         _emit(self, "analysis_error", str(exc))
         return
 
-    _log(self, f"▶ Модель: {model_name} | потоков: {max_workers} | файлов: {total_items}\n")
+    _log(
+        self,
+        f"▶ Модель: {model_name} | устройство: {getattr(self, 'compute_device', 'unknown')} | "
+        f"worker'ов: {max_workers} | файлов: {total_items}\n",
+    )
     _emit(self, "progress_setup", total_items)
 
     def process_item(item_id: str, img_path: str):
