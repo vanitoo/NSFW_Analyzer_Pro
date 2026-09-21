@@ -1,53 +1,41 @@
+from __future__ import annotations
+
 import os
 import tkinter as tk
+from pathlib import Path
+from typing import Any
+
+LOG_PATH = Path("analyzer_nu.log")
 
 
-def convert_size(size_bytes):
-    """Конвертирует размер файла в удобочитаемый формат"""
-    for unit in ['Б', 'КБ', 'МБ', 'ГБ']:
-        if size_bytes < 1024:
-            return f"{size_bytes:.1f} {unit}"
-        size_bytes /= 1024
-    return f"{size_bytes:.1f} ТБ"
+def convert_size(size_bytes: int) -> str:
+    """Convert bytes to a compact human-readable binary size."""
+    size = float(size_bytes)
+    for unit in ("Б", "КБ", "МБ", "ГБ"):
+        if size < 1024:
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} ТБ"
 
 
-def get_cpu_cores():
-    """Возвращает количество доступных логических ядер"""
-    import multiprocessing
-    return multiprocessing.cpu_count()
-    try:
-        return os.cpu_count() or 4
-    except Exception:
-        return 4  # fallback
+def get_cpu_cores() -> int:
+    """Return a conservative positive CPU count."""
+    return max(1, os.cpu_count() or 4)
 
 
-def log_message(message, console=None):
-    if console:
+def log_message(message: str, console: Any | None = None) -> None:
+    """Write a message to the optional Tk console and the persistent log file.
+
+    The console argument must only be used from the Tk main thread.
+    """
+    if console is not None:
         console.insert(tk.END, message)
         console.see(tk.END)
-        console.update()
+
     try:
-        with open("analyzer_nu.log", "a", encoding="utf-8") as f:
-            f.write(message)
-    except Exception as e:
-        print(f"[Ошибка записи в лог-файл] {e}")
-    print(message.strip())  # Вывод в консоль Python
+        with LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(message)
+    except OSError as exc:
+        print(f"[Ошибка записи в лог-файл] {exc}")
 
-
-def sort_treeview_column(self, col, reverse):
-    data = [(self.result_tree.set(k, col), k) for k in self.result_tree.get_children('')]
-
-    # Преобразуем значения для числовых и текстовых столбцов
-    def convert(value):
-        try:
-            return float(value.replace(",", "."))
-        except:
-            return value.lower()  # текст сравниваем нечувствительно к регистру
-
-    data.sort(key=lambda t: convert(t[0]), reverse=reverse)
-
-    for index, (_, k) in enumerate(data):
-        self.result_tree.move(k, '', index)
-
-    # Перепривязка заголовка для смены направления
-    self.result_tree.heading(col, command=lambda: self.sort_treeview_column(col, not reverse))
+    print(message.rstrip())
