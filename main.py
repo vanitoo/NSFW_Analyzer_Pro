@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import tkinter as tk
 
-from ui import NSFWAnalyzerApp
+from src.ui import NSFWAnalyzerApp
 
 
 def main() -> None:
