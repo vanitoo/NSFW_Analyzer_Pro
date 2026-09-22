@@ -436,8 +436,13 @@ class GeneralClassifierTab:
         except ValueError:
             return 0.0
 
-        unit = parts[1].upper() if len(parts) > 1 else "B"
+        unit = parts[1].upper() if len(parts) > 1 else "Б"
         multipliers = {
+            "Б": 1.0,
+            "КБ": 1024.0,
+            "МБ": 1024.0**2,
+            "ГБ": 1024.0**3,
+            "ТБ": 1024.0**4,
             "B": 1.0,
             "KB": 1024.0,
             "MB": 1024.0**2,
@@ -463,8 +468,8 @@ class GeneralClassifierTab:
         return (0, text.casefold())
 
     def sort_treeview_column(self, column: str) -> None:
-        reverse = not self._sort_reverse.get(column, False)
-        self._sort_reverse[column] = reverse
+        reverse = self._sort_reverse.get(column, False)
+        self._sort_reverse[column] = not reverse
 
         rows = [
             (self._sort_value(column, self.tree.set(item, column)), item)
