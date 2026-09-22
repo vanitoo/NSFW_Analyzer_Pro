@@ -12,7 +12,16 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from PIL import Image, ImageTk
 
-from .analyzer import MODEL_CHOICES, analyze_images
+from .analyzer import (
+    MODEL_CATEGORY_CHOICES,
+    MODEL_CHOICES,
+    STATUS_BAD,
+    STATUS_NUDE,
+    STATUS_SAFE,
+    analyze_images,
+    reset_model,
+)
+from .diagnostics import build_startup_report
 from .scanner import scan_folder_async
 from .utils import log_message
 
@@ -41,6 +50,11 @@ class NSFWAnalyzerApp:
         self._create_widgets()
         self.root.after(100, self.process_queue)
         self.status_var.set("Готов к работе")
+        threading.Thread(
+            target=self._startup_report_worker,
+            daemon=True,
+            name="startup-diagnostics",
+        ).start()
 
     def _create_widgets(self) -> None:
         self.control_frame = tk.Frame(self.root)
@@ -66,17 +80,17 @@ class NSFWAnalyzerApp:
         self.threshold_slider.set(0.7)
         self.threshold_slider.grid(row=0, column=4, padx=5)
 
-        tk.Label(self.control_frame, text="Фильтр:").grid(row=0, column=5, padx=5)
-        self.filter_var = tk.StringVar(value="Все")
-        self.filter_combobox = ttk.Combobox(
+        tk.Label(self.control_frame, text="Модель:").grid(row=0, column=5, padx=5)
+        self.model_type = tk.StringVar(value=MODEL_CHOICES[0])
+        self.model_combobox = ttk.Combobox(
             self.control_frame,
-            textvariable=self.filter_var,
-            values=("Все", "Только НЮ", "Только безопасные", "Неопределённые", "BAD"),
+            textvariable=self.model_type,
+            values=MODEL_CHOICES,
             state="readonly",
-            width=16,
+            width=20,
         )
-        self.filter_combobox.grid(row=0, column=6, padx=5)
-        self.filter_combobox.bind("<<ComboboxSelected>>", self.apply_filter)
+        self.model_combobox.grid(row=0, column=6, padx=5)
+        self.model_combobox.bind("<<ComboboxSelected>>", self.on_model_changed)
 
         self.analyze_button = tk.Button(self.control_frame, text="Анализировать", command=self.toggle_analysis)
         self.analyze_button.grid(row=0, column=7, padx=5)
@@ -89,16 +103,29 @@ class NSFWAnalyzerApp:
         )
         self.move_button.grid(row=0, column=8, padx=5)
 
-        tk.Label(self.control_frame, text="Модель:").grid(row=0, column=9, padx=5)
-        self.model_type = tk.StringVar(value=MODEL_CHOICES[0])
-        self.model_combobox = ttk.Combobox(
+        tk.Label(self.control_frame, text="Статус:").grid(row=1, column=0, padx=5, pady=(5, 0))
+        self.filter_var = tk.StringVar(value="Все статусы")
+        self.filter_combobox = ttk.Combobox(
             self.control_frame,
-            textvariable=self.model_type,
-            values=MODEL_CHOICES,
+            textvariable=self.filter_var,
+            values=("Все статусы", STATUS_NUDE, STATUS_SAFE, STATUS_BAD, "Не анализировано"),
             state="readonly",
             width=18,
         )
-        self.model_combobox.grid(row=0, column=10, padx=5)
+        self.filter_combobox.grid(row=1, column=1, padx=5, pady=(5, 0), sticky="w")
+        self.filter_combobox.bind("<<ComboboxSelected>>", self.apply_filter)
+
+        tk.Label(self.control_frame, text="Категория:").grid(row=1, column=2, padx=5, pady=(5, 0))
+        self.category_filter_var = tk.StringVar(value="Все категории")
+        self.category_filter_combobox = ttk.Combobox(
+            self.control_frame,
+            textvariable=self.category_filter_var,
+            values=("Все категории", *MODEL_CATEGORY_CHOICES[MODEL_CHOICES[0]]),
+            state="readonly",
+            width=26,
+        )
+        self.category_filter_combobox.grid(row=1, column=3, columnspan=2, padx=5, pady=(5, 0), sticky="w")
+        self.category_filter_combobox.bind("<<ComboboxSelected>>", self.apply_filter)
 
         self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         self.main_paned.pack(fill=tk.BOTH, expand=True)
@@ -114,7 +141,7 @@ class NSFWAnalyzerApp:
         self.tree_scroll_x = ttk.Scrollbar(self.tree_frame, orient=tk.HORIZONTAL)
         self.tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
 
-        columns = ("#", "Имя файла", "Путь", "Размер", "Дата изменения", "Оценка", "Статус")
+        columns = ("#", "Имя файла", "Путь", "Размер", "Дата изменения", "Оценка", "Статус", "Категория")
         self.result_tree = ttk.Treeview(
             self.tree_frame,
             columns=columns,
@@ -129,11 +156,12 @@ class NSFWAnalyzerApp:
         column_config = {
             "#": {"width": 55, "anchor": "center", "stretch": False},
             "Имя файла": {"width": 220},
-            "Путь": {"width": 420},
+            "Путь": {"width": 360},
             "Размер": {"width": 90, "anchor": "e"},
             "Дата изменения": {"width": 135},
             "Оценка": {"width": 85, "anchor": "center"},
-            "Статус": {"width": 80, "anchor": "center"},
+            "Статус": {"width": 110, "anchor": "center"},
+            "Категория": {"width": 190, "anchor": "center"},
         }
         for column, config in column_config.items():
             self.result_tree.heading(
@@ -177,11 +205,13 @@ class NSFWAnalyzerApp:
         self.path_entry.config(state=state)
         self.analyze_button.config(state=tk.DISABLED if active else tk.NORMAL)
         self.filter_combobox.config(state="disabled" if active else "readonly")
+        self.category_filter_combobox.config(state="disabled" if active else "readonly")
 
     def _set_analysis_controls(self, active: bool) -> None:
         self.browse_button.config(state=tk.DISABLED if active else tk.NORMAL)
         self.path_entry.config(state=tk.DISABLED if active else tk.NORMAL)
         self.filter_combobox.config(state="disabled" if active else "readonly")
+        self.category_filter_combobox.config(state="disabled" if active else "readonly")
         self.threshold_slider.config(state=tk.DISABLED if active else tk.NORMAL)
         self.model_combobox.config(state="disabled" if active else "readonly")
         self.analyze_button.config(text="Остановить" if active else "Анализировать", state=tk.NORMAL)
@@ -196,6 +226,8 @@ class NSFWAnalyzerApp:
         self.stop_analysis = False
         self.result_tree.delete(*self.result_tree.get_children())
         self.all_files.clear()
+        self.filter_var.set("Все статусы")
+        self.category_filter_var.set("Все категории")
         self.preview_label.config(image="", text="Выберите изображение")
         self.preview_label.image = None
         self._last_preview_path = None
@@ -212,6 +244,42 @@ class NSFWAnalyzerApp:
             name="folder-scan",
         )
         self.scan_thread.start()
+
+    def _startup_report_worker(self) -> None:
+        try:
+            report = build_startup_report()
+        except Exception as exc:
+            report = f"\n⚠ Не удалось сформировать стартовый отчёт: {exc}\n"
+        self.image_queue.put(("log", report))
+
+    def _set_category_filter_options(self, model_name: str) -> None:
+        categories = MODEL_CATEGORY_CHOICES.get(model_name, ())
+        self.category_filter_combobox["values"] = ("Все категории", *categories)
+        self.category_filter_var.set("Все категории")
+
+    def _clear_analysis_results(self) -> None:
+        for row in self.all_files:
+            while len(row) < 8:
+                row.append("")
+            row[5] = ""
+            row[6] = ""
+            row[7] = ""
+
+        self.filter_var.set("Все статусы")
+        self.category_filter_var.set("Все категории")
+        self.result_tree.delete(*self.result_tree.get_children())
+        for row in self.all_files:
+            self._insert_row(row)
+
+        self.progress["value"] = 0
+        self.status_var.set("Результаты очищены. Готов к анализу новой моделью")
+
+    def on_model_changed(self, _event=None) -> None:
+        model_name = self.model_type.get()
+        reset_model(self)
+        self._set_category_filter_options(model_name)
+        self._clear_analysis_results()
+        log_message(f"\n🔄 Выбрана модель: {model_name}. Результаты предыдущей модели очищены.\n", self.log_console)
 
     def toggle_analysis(self) -> None:
         if self.analysis_thread and self.analysis_thread.is_alive():
@@ -312,9 +380,12 @@ class NSFWAnalyzerApp:
             self.root.after(100, self.process_queue)
 
     def _insert_row(self, file_data: list | tuple) -> str:
-        status = str(file_data[6]).strip() if len(file_data) > 6 else ""
+        row = list(file_data)
+        while len(row) < 8:
+            row.append("")
+        status = str(row[6]).strip()
         tag = self._status_tag(status)
-        return self.result_tree.insert("", "end", values=file_data, tags=(tag,) if tag else ())
+        return self.result_tree.insert("", "end", values=row, tags=(tag,) if tag else ())
 
     def _apply_item_update(self, item_id: str, updates: dict[str, str]) -> None:
         if not self.result_tree.exists(item_id):
@@ -339,33 +410,41 @@ class NSFWAnalyzerApp:
                 break
 
     def _status_tag(self, status: str) -> str:
-        if status == "✓":
+        if status == STATUS_NUDE:
             return "nude"
-        if status == "✗":
+        if status == STATUS_SAFE:
             return "safe"
-        if status == "BAD":
+        if status == STATUS_BAD:
             return "bad"
         return ""
 
-    def _matches_filter(self, status: str, filter_type: str | None = None) -> bool:
-        current = filter_type or self.filter_var.get()
-        if current == "Все":
-            return True
-        if current == "Только НЮ":
-            return status == "✓"
-        if current == "Только безопасные":
-            return status == "✗"
-        if current == "BAD":
-            return status == "BAD"
-        if current == "Неопределённые":
-            return status not in {"", "✓", "✗", "BAD"}
-        return True
+    def _matches_filter(
+        self,
+        status: str,
+        category: str,
+        filter_type: str | None = None,
+        category_filter: str | None = None,
+    ) -> bool:
+        current_status = filter_type or self.filter_var.get()
+        current_category = category_filter or self.category_filter_var.get()
+
+        status_match = (
+            current_status == "Все статусы"
+            or current_status == status
+            or (current_status == "Не анализировано" and not status)
+        )
+        category_match = (
+            current_category == "Все категории"
+            or current_category == category
+        )
+        return status_match and category_match
 
     def apply_filter(self, _event=None) -> None:
         self.result_tree.delete(*self.result_tree.get_children())
         for file_data in self.all_files:
-            status = str(file_data[6]).strip()
-            if self._matches_filter(status):
+            status = str(file_data[6]).strip() if len(file_data) > 6 else ""
+            category = str(file_data[7]).strip() if len(file_data) > 7 else ""
+            if self._matches_filter(status, category):
                 self._insert_row(file_data)
 
     def sort_treeview_column(self, column: str, reverse: bool) -> None:
@@ -390,16 +469,15 @@ class NSFWAnalyzerApp:
 
     def _target_subfolder(self) -> str | None:
         mapping = {
-            "Только НЮ": "NU",
-            "Неопределённые": "UNKNOWN",
-            "BAD": "BAD",
+            STATUS_NUDE: "NU",
+            STATUS_BAD: "BAD",
         }
         return mapping.get(self.filter_var.get())
 
     def move_selected_file_by_filter(self, _event=None) -> None:
         target_subfolder = self._target_subfolder()
         if target_subfolder is None:
-            messagebox.showinfo("Инфо", "Для перемещения выберите фильтр НЮ, Неопределённые или BAD")
+            messagebox.showinfo("Инфо", "Для перемещения выберите статус НЮ или BAD")
             return
 
         selected = self.result_tree.selection()
@@ -410,7 +488,7 @@ class NSFWAnalyzerApp:
     def move_images_by_filter(self) -> None:
         target_subfolder = self._target_subfolder()
         if target_subfolder is None:
-            messagebox.showinfo("Инфо", "Для перемещения выберите фильтр НЮ, Неопределённые или BAD")
+            messagebox.showinfo("Инфо", "Для перемещения выберите статус НЮ или BAD")
             return
 
         visible = self.result_tree.get_children()
@@ -431,7 +509,8 @@ class NSFWAnalyzerApp:
                 continue
 
             status = str(values[6]).strip()
-            if not self._matches_filter(status):
+            category = str(values[7]).strip() if len(values) > 7 else ""
+            if not self._matches_filter(status, category):
                 continue
 
             source = Path(str(values[2])).resolve()
