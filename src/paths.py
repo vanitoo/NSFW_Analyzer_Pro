@@ -18,6 +18,7 @@ CACHE_DIR = _cache_root()
 DOWNLOADS_DIR = CACHE_DIR / "downloads"
 HUGGINGFACE_CACHE_DIR = CACHE_DIR / "huggingface"
 OPENCLIP_CACHE_DIR = HUGGINGFACE_CACHE_DIR / "open_clip"
+RAMPP_CACHE_DIR = CACHE_DIR / "rampp"
 TFHUB_CACHE_DIR = CACHE_DIR / "tfhub"
 OPENNSFW2_CACHE_DIR = CACHE_DIR / "opennsfw2"
 OPENNSFW2_WEIGHTS = OPENNSFW2_CACHE_DIR / "open_nsfw_weights.h5"
@@ -70,6 +71,7 @@ def configure_cache_environment() -> None:
     DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
     HUGGINGFACE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     OPENCLIP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    RAMPP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     TFHUB_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     OPENNSFW2_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     GANTMAN_CACHE_DIR.mkdir(parents=True, exist_ok=True)
