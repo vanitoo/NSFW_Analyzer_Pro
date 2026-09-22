@@ -22,6 +22,9 @@ python -m pip install --disable-pip-version-check -r requirements.txt || exit /b
 echo Installing/updating additional NSFW models...
 python -m pip install --disable-pip-version-check -r requirements-models.txt || exit /b 1
 
+echo Installing experimental general classifier...
+python -m pip install --disable-pip-version-check -r requirements-general.txt || exit /b 1
+
 echo Starting NSFW Analyzer Pro...
 python main.py
 endlocal
