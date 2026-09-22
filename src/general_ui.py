@@ -360,6 +360,7 @@ class GeneralClassifierTab:
                 elif event == "classification_error":
                     self.classify_thread = None
                     self.browse_button.config(state=tk.NORMAL)
+                    self.model_combo.config(state="readonly")
                     self.classify_button.config(text="Классифицировать", state=tk.NORMAL)
                     self.status_var.set("Ошибка общего классификатора")
                     messagebox.showerror("Общий классификатор", task[1], parent=self.dialog_parent)
