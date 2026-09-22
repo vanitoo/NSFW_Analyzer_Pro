@@ -168,14 +168,13 @@ class RAMPlusPlusBackend:
             raise RuntimeError(str(response.get("error", "неизвестная ошибка RAM++")))
 
         tags = str(response.get("tags", "")).replace(" | ", ", ")
-        tags_zh = str(response.get("tags_zh", "")).replace(" | ", ", ")
         return {
             "kind": "Теги",
             "category": "",
             "subcategory": "",
             "score": "",
             "top5": "",
-            "tags": tags if not tags_zh else f"{tags} | 中文: {tags_zh}",
+            "tags": tags,
         }
 
     def unload(self) -> None:
