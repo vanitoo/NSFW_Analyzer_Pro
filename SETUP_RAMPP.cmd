@@ -32,7 +32,7 @@ if errorlevel 1 (
 )
 
 echo Installing isolated RAM++ dependencies...
-python -m pip install "timm==0.4.12" "transformers>=4.25.1" "fairscale==0.4.4" scipy Pillow || exit /b 1
+python -m pip install "timm==0.4.12" "transformers>=4.25.1,<5.0" "fairscale==0.4.4" scipy Pillow || exit /b 1
 python -m pip install "clip @ git+https://github.com/openai/CLIP.git" || exit /b 1
 python -m pip install --no-deps "git+https://github.com/xinyu1205/recognize-anything.git" || exit /b 1
 
