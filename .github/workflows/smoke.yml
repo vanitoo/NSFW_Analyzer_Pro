@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - cleanup/stabilize-root
+      - feature/general-image-classifier
   pull_request:
     branches:
       - master
@@ -26,6 +27,10 @@ jobs:
           test -f main.py
           test -f src/__init__.py
           test -f src/ui.py
+          test -f src/general_ui.py
+          test -f src/general_classifier.py
+          test -f src/general_categories.py
+          test -f requirements-general.txt
           test ! -e ui.py
           test ! -e v1
           test ! -e v3
