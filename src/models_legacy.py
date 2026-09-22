@@ -11,9 +11,13 @@ from typing import Any, Callable
 import numpy as np
 from PIL import Image
 
-from .paths import DOWNLOADS_DIR, GANTMAN_CACHE_DIR
+from .paths import DOWNLOADS_DIR, GANTMAN_CACHE_DIR, OPENNSFW2_WEIGHTS
 from .utils import get_cpu_cores
 
+OPENNSFW2_WEIGHTS_URL = (
+    "https://github.com/bhky/opennsfw2/releases/download/v0.1.0/"
+    "open_nsfw_weights.h5"
+)
 GANTMAN_VERSION = "1.2.0"
 GANTMAN_RELEASE_URL = (
     "https://github.com/GantMan/nsfw_model/releases/download/"
@@ -23,6 +27,82 @@ GANTMAN_ARCHIVE = DOWNLOADS_DIR / "gantman-1.2.0.zip"
 GANTMAN_ROOT = GANTMAN_CACHE_DIR / GANTMAN_VERSION
 GANTMAN_LABELS = ("drawings", "hentai", "neutral", "porn", "sexy")
 GANTMAN_UNSAFE = (1, 3, 4)
+
+
+def _download_with_progress(
+    url: str,
+    destination: Path,
+    label: str,
+    log: Callable[[Any, str], None],
+    self: Any,
+) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = destination.with_suffix(destination.suffix + ".part")
+    temp_path.unlink(missing_ok=True)
+
+    log(self, f"[{label}] загрузка: 0%\n")
+    try:
+        with urllib.request.urlopen(url) as response, temp_path.open("wb") as handle:
+            total = int(response.headers.get("Content-Length") or 0)
+            downloaded = 0
+            last_percent = 0
+            next_bytes_log = 10 * 1024 * 1024
+
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                handle.write(chunk)
+                downloaded += len(chunk)
+
+                if total > 0:
+                    percent = min(100, int(downloaded * 100 / total))
+                    if percent >= last_percent + 10 or percent == 100:
+                        log(
+                            self,
+                            f"[{label}] загрузка: {percent}% "
+                            f"({downloaded / 1024 / 1024:.1f}/{total / 1024 / 1024:.1f} MB)\n",
+                        )
+                        last_percent = percent
+                elif downloaded >= next_bytes_log:
+                    log(self, f"[{label}] загружено {downloaded / 1024 / 1024:.1f} MB\n")
+                    next_bytes_log += 10 * 1024 * 1024
+
+        temp_path.replace(destination)
+        log(self, f"[{label}] загрузка: 100% | файл сохранён\n")
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def ensure_opennsfw2_weights(
+    self: Any,
+    log: Callable[[Any, str], None],
+) -> str:
+    """Ensure Yahoo/OpenNSFW2 weights exist in the project cache."""
+    if OPENNSFW2_WEIGHTS.exists():
+        log(
+            self,
+            f"[Yahoo/OpenNSFW2] кэш найден: "
+            f"{OPENNSFW2_WEIGHTS.stat().st_size / 1024 / 1024:.1f} MB\n",
+        )
+        return str(OPENNSFW2_WEIGHTS)
+
+    log(self, "[Yahoo/OpenNSFW2] веса не найдены, начинаем загрузку.\n")
+    _download_with_progress(
+        OPENNSFW2_WEIGHTS_URL,
+        OPENNSFW2_WEIGHTS,
+        "Yahoo/OpenNSFW2",
+        log,
+        self,
+    )
+
+    with OPENNSFW2_WEIGHTS.open("rb") as handle:
+        if handle.read(8) != b"\x89HDF\r\n\x1a\n":
+            OPENNSFW2_WEIGHTS.unlink(missing_ok=True)
+            raise RuntimeError("Скачанный open_nsfw_weights.h5 не является корректным HDF5")
+
+    return str(OPENNSFW2_WEIGHTS)
 
 
 def tensorflow_device_name() -> tuple[str, int]:
@@ -54,22 +134,34 @@ def _find_gantman_tflite(root: Path) -> Path | None:
 def _ensure_gantman_tflite(log: Callable[[Any, str], None], self: Any) -> Path:
     cached = _find_gantman_tflite(GANTMAN_ROOT)
     if cached is not None:
+        log(self, "[GantMan] кэш модели найден: 100% — загрузка не требуется\n")
         return cached
 
     GANTMAN_ARCHIVE.parent.mkdir(parents=True, exist_ok=True)
     if not GANTMAN_ARCHIVE.exists():
         log(
             self,
-            "[GantMan] Скачиваем официальный release 1.2.0 (~100 MB). "
-            "Это выполняется один раз.\n",
+            "[GantMan] официальный release 1.2.0 не найден в кэше (~100 MB).\n",
         )
-        urllib.request.urlretrieve(GANTMAN_RELEASE_URL, str(GANTMAN_ARCHIVE))
+        _download_with_progress(
+            GANTMAN_RELEASE_URL,
+            GANTMAN_ARCHIVE,
+            "GantMan",
+            log,
+            self,
+        )
+    else:
+        log(
+            self,
+            f"[GantMan] архив уже в кэше: "
+            f"{GANTMAN_ARCHIVE.stat().st_size / 1024 / 1024:.1f} MB\n",
+        )
 
     temp_root = GANTMAN_ROOT.with_name(f"{GANTMAN_ROOT.name}.tmp")
     shutil.rmtree(temp_root, ignore_errors=True)
     temp_root.parent.mkdir(parents=True, exist_ok=True)
 
-    log(self, "[GantMan] Распаковываем TFLite-модель в локальный cache...\n")
+    log(self, "[GantMan] подготовка модели: 70% — распаковка TFLite...\n")
     _safe_extract_zip(GANTMAN_ARCHIVE, temp_root)
 
     candidate = _find_gantman_tflite(temp_root)
@@ -85,6 +177,7 @@ def _ensure_gantman_tflite(log: Callable[[Any, str], None], self: Any) -> Path:
     cached = _find_gantman_tflite(GANTMAN_ROOT)
     if cached is None:
         raise RuntimeError("Не удалось подготовить TFLite-модель GantMan")
+    log(self, "[GantMan] подготовка модели: 100% — готово\n")
     return cached
 
 
