@@ -10,7 +10,7 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from PIL import Image, ImageTk
 
-from .general_classifier import GeneralImageClassifier
+from .general_classifier import GENERAL_MODEL_CHOICES, create_general_backend
 from .scanner import scan_folder_async
 from .utils import log_message
 
@@ -29,6 +29,7 @@ class GeneralClassifierTab:
         "Подкатегория",
         "Score",
         "Топ-5",
+        "Теги",
     )
 
     def __init__(self, parent: tk.Misc, folder_var: tk.StringVar) -> None:
@@ -41,7 +42,8 @@ class GeneralClassifierTab:
         self.image_queue: queue.Queue = queue.Queue()
         self.scan_thread: threading.Thread | None = None
         self.classify_thread: threading.Thread | None = None
-        self.classifier: GeneralImageClassifier | None = None
+        self.classifier = None
+        self._requested_model = GENERAL_MODEL_CHOICES[0]
 
         self.all_files: list[list] = []
         self.path_to_item: dict[str, str] = {}
@@ -49,7 +51,7 @@ class GeneralClassifierTab:
 
         self._create_widgets()
         self.parent.after(100, self.process_queue)
-        self.status_var.set("Выберите папку и нажмите «Сканировать»")
+        self.status_var.set("Выберите папку кнопкой «Обзор»")
 
     def _create_widgets(self) -> None:
         controls = tk.Frame(self.parent)
@@ -71,10 +73,17 @@ class GeneralClassifierTab:
         )
         self.classify_button.grid(row=0, column=3, padx=4)
 
-        tk.Label(
+        tk.Label(controls, text="Модель:").grid(row=0, column=4, padx=(12, 4))
+        self.model_type = tk.StringVar(value=GENERAL_MODEL_CHOICES[0])
+        self.model_combo = ttk.Combobox(
             controls,
-            text="Модель: MobileCLIP2-S0 / OpenCLIP",
-        ).grid(row=0, column=4, columnspan=2, padx=10)
+            textvariable=self.model_type,
+            values=GENERAL_MODEL_CHOICES,
+            state="readonly",
+            width=20,
+        )
+        self.model_combo.grid(row=0, column=5, padx=4)
+        self.model_combo.bind("<<ComboboxSelected>>", self.on_model_changed)
 
         tk.Label(controls, text="Тип:").grid(row=1, column=0, padx=4, pady=(6, 0))
         self.kind_filter = tk.StringVar(value="Все типы")
@@ -147,7 +156,8 @@ class GeneralClassifierTab:
             "Категория": 120,
             "Подкатегория": 175,
             "Score": 80,
-            "Топ-5": 390,
+            "Топ-5": 300,
+            "Теги": 420,
         }
         for column in self.COLUMNS:
             self.tree.heading(
@@ -231,11 +241,13 @@ class GeneralClassifierTab:
             return
 
         self.stop_analysis = False
+        self._requested_model = self.model_type.get()
         self.browse_button.config(state=tk.DISABLED)
+        self.model_combo.config(state="disabled")
         self.classify_button.config(text="Остановить", state=tk.NORMAL)
         self.progress["maximum"] = len(self.all_files)
         self.progress["value"] = 0
-        self.status_var.set("Подготовка MobileCLIP2-S0...")
+        self.status_var.set(f"Подготовка {self._requested_model}...")
 
         self.classify_thread = threading.Thread(
             target=self._classification_worker,
@@ -247,8 +259,9 @@ class GeneralClassifierTab:
     def _classification_worker(self) -> None:
         try:
             if self.classifier is None:
-                self.classifier = GeneralImageClassifier(
-                    lambda message: self.image_queue.put(("log", message))
+                self.classifier = create_general_backend(
+                    self._requested_model,
+                    lambda message: self.image_queue.put(("log", message)),
                 )
             self.classifier.load()
         except Exception as exc:
@@ -275,7 +288,8 @@ class GeneralClassifierTab:
                             "kind": "Ошибка",
                             "category": "Ошибка",
                             "subcategory": "",
-                            "score": 0.0,
+                            "score": "",
+                            "top5": "",
                             "tags": str(exc),
                         },
                     )
@@ -309,7 +323,7 @@ class GeneralClassifierTab:
 
                 elif event == "scan_batch":
                     for scan_row in task[1]:
-                        row = list(scan_row[:5]) + ["", "", "", "", ""]
+                        row = list(scan_row[:5]) + ["", "", "", "", "", ""]
                         self.all_files.append(row)
                         self._insert_row(row)
 
@@ -336,6 +350,7 @@ class GeneralClassifierTab:
                     self.apply_filter()
                     self.classify_thread = None
                     self.browse_button.config(state=tk.NORMAL)
+                    self.model_combo.config(state="readonly")
                     self.classify_button.config(text="Классифицировать", state=tk.NORMAL)
                     if stopped:
                         self.status_var.set(f"Классификация остановлена ({processed}/{total})")
@@ -345,9 +360,10 @@ class GeneralClassifierTab:
                 elif event == "classification_error":
                     self.classify_thread = None
                     self.browse_button.config(state=tk.NORMAL)
+                    self.model_combo.config(state="readonly")
                     self.classify_button.config(text="Классифицировать", state=tk.NORMAL)
                     self.status_var.set("Ошибка общего классификатора")
-                    messagebox.showerror("MobileCLIP2", task[1], parent=self.dialog_parent)
+                    messagebox.showerror("Общий классификатор", task[1], parent=self.dialog_parent)
 
         except queue.Empty:
             pass
@@ -366,8 +382,10 @@ class GeneralClassifierTab:
                 row[5] = str(result.get("kind", ""))
                 row[6] = str(result.get("category", ""))
                 row[7] = str(result.get("subcategory", ""))
-                row[8] = f"{float(result.get('score', 0.0)):.4f}"
-                row[9] = str(result.get("tags", ""))
+                score = result.get("score", "")
+                row[8] = f"{float(score):.4f}" if score not in ("", None) else ""
+                row[9] = str(result.get("top5", ""))
+                row[10] = str(result.get("tags", ""))
                 updated_row = row
                 break
 
@@ -377,6 +395,40 @@ class GeneralClassifierTab:
         item = self.path_to_item.get(path)
         if item and self.tree.exists(item):
             self.tree.item(item, values=updated_row)
+
+    def _clear_model_results(self) -> None:
+        for row in self.all_files:
+            while len(row) < len(self.COLUMNS):
+                row.append("")
+            for index in range(5, len(self.COLUMNS)):
+                row[index] = ""
+
+        self._reset_filters()
+        self.tree.delete(*self.tree.get_children())
+        self.path_to_item.clear()
+        for row in self.all_files:
+            self._insert_row(row)
+        self.progress["value"] = 0
+
+    def on_model_changed(self, _event=None) -> None:
+        if self.classify_thread and self.classify_thread.is_alive():
+            return
+
+        old_backend = self.classifier
+        self.classifier = None
+        if old_backend is not None:
+            try:
+                old_backend.unload()
+            except Exception as exc:
+                log_message(f"[General] ошибка выгрузки backend: {exc}\n", self.log_console)
+
+        self._clear_model_results()
+        model_name = self.model_type.get()
+        self.status_var.set(f"Выбрана модель: {model_name}")
+        log_message(
+            f"\n🔄 Общий классификатор: выбрана модель {model_name}. Результаты очищены.\n",
+            self.log_console,
+        )
 
     def _reset_filters(self) -> None:
         self.kind_filter.set("Все типы")
@@ -543,3 +595,9 @@ class GeneralClassifierTab:
     def shutdown(self) -> None:
         self.running = False
         self.stop_analysis = True
+        if self.classifier is not None:
+            try:
+                self.classifier.unload()
+            except Exception:
+                pass
+            self.classifier = None

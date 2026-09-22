@@ -1,0 +1,5 @@
+timm==0.4.12
+transformers>=4.25.1,<5.0
+fairscale==0.4.4
+scipy
+Pillow

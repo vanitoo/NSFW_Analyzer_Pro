@@ -5,6 +5,7 @@ on:
     branches:
       - cleanup/stabilize-root
       - feature/general-image-classifier
+      - feature/general-backends-v2
   pull_request:
     branches:
       - master
@@ -30,7 +31,11 @@ jobs:
           test -f src/general_ui.py
           test -f src/general_classifier.py
           test -f src/general_categories.py
+          test -f src/rampp_backend.py
+          test -f src/rampp_worker.py
+          test -f SETUP_RAMPP.cmd
           test -f requirements-general.txt
+          test -f requirements-rampp.txt
           test ! -e ui.py
           test ! -e v1
           test ! -e v3

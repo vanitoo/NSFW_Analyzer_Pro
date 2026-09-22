@@ -2,7 +2,7 @@
 
 **NSFW Analyzer Pro** — локальное настольное приложение на Python/Tkinter для пакетного анализа изображений и сортировки потенциально NSFW-контента.
 
-Текущая версия: **2.5.0**.
+Текущая версия: **2.6.0**.
 
 ## Возможности
 
@@ -25,14 +25,16 @@
 > UI эксперимента встроен в главное окно: одно окно с вкладками `NSFW-анализ` и `Общий классификатор`. Отдельный `Toplevel` больше не создаётся.
 
 
-В ветке `feature/general-image-classifier` добавлен экспериментальный режим, который **не заменяет NSFW-анализатор**. Оба режима теперь работают в **одном окне** на двух вкладках:
+Общий классификатор **не заменяет NSFW-анализатор**. Оба режима работают в **одном окне** на двух вкладках:
 
 - **NSFW-анализ** — существующий анализатор;
 - **Общий классификатор** — экспериментальный MobileCLIP2 режим.
 
 Поле папки общее для обеих вкладок: выбранный путь сразу виден в NSFW-анализе и в общем классификаторе. Во вкладке общего классификатора отдельная кнопка «Сканировать» не нужна: кнопка «Обзор» выбирает папку и сразу запускает её сканирование.
 
-Используется **MobileCLIP2-S0 через OpenCLIP**. Это zero-shot image classifier: категории задаются текстовыми описаниями, поэтому для добавления новых классов не требуется переобучение модели.
+Для общей классификации доступны **MobileCLIP2-S0** и **MobileCLIP2-S2** через OpenCLIP. Это zero-shot image classifiers: категории задаются текстовыми описаниями, поэтому для добавления новых классов не требуется переобучение модели. S0 легче и быстрее, S2 предназначен для более точной классификации на более мощном GPU.
+
+Также доступен **RAM++ (Recognize Anything Plus)** как отдельный image-tagging backend. Он не выбирает одну категорию, а возвращает набор тегов изображения, например `mountain, snow, lake, sky`.
 
 Первый набор категорий:
 
@@ -50,7 +52,7 @@
 Результат общего классификатора хранится отдельно от NSFW-результатов:
 
 ```text
-Тип | Категория | Подкатегория | Score | Топ-5
+Тип | Категория | Подкатегория | Score | Топ-5 | Теги
 ```
 
 Фильтры каскадные: после выбора категории список подкатегорий содержит только значения этой категории. По нажатию на заголовок любого столбца таблица сортируется; повторный клик меняет направление сортировки.
@@ -67,13 +69,35 @@
 Документ | Документы | Паспорт | 0.61 | Паспорт 61%, Удостоверение личности 22% ...
 ```
 
-При первом запуске MobileCLIP2-S0 скачивает около 300 MB safetensors-весов в project-local cache:
+При первом запуске выбранная MobileCLIP2-модель скачивает свои safetensors-веса в project-local cache:
 
 ```text
 .cache/huggingface/open_clip/
 ```
 
-Для экспериментального режима добавлен отдельный файл зависимостей `requirements-general.txt`. `START.cmd` и `START_NVIDIA.cmd` в этой ветке устанавливают его автоматически.
+Зависимости MobileCLIP находятся в `requirements-general.txt`; `START.cmd` и `START_NVIDIA.cmd` устанавливают их автоматически.
+
+### RAM++
+
+RAM++ изолирован в отдельном окружении `.venv-rampp`, потому что официальный проект требует старый `timm==0.4.12`, несовместимый с современным стеком OpenCLIP в основном окружении. Один раз выполните:
+
+```bat
+SETUP_RAMPP.cmd
+```
+
+Скрипт пытается использовать Python 3.10 через Windows Python Launcher, если он установлен, иначе использует обычный `python`. Для NVIDIA ставится CUDA 12.8 PyTorch, без NVIDIA — CPU PyTorch.
+
+Официальный RAM++ source закреплён на конкретной ревизии upstream. Checkpoint `ram_plus_swin_large_14m.pth` (~3 GB) скачивается только при первом запуске анализа через RAM++ и хранится в `.cache/rampp`.
+
+RAM++ запускается отдельным persistent worker-процессом: модель загружается один раз и затем обрабатывает всю выбранную папку. Это также изолирует его старые зависимости от MobileCLIP/NSFW backend'ов.
+
+Если RAM++ уже установлен в другом окружении, можно не использовать `.venv-rampp`, а указать Python напрямую:
+
+```bat
+set NSFW_ANALYZER_RAMPP_PYTHON=D:\AI\rampp\Scripts\python.exe
+START_NVIDIA.cmd
+```
+
 
 ## Модели
 
@@ -85,6 +109,9 @@
 | NudeNet Detector | YOLOv8/ONNX detector открытых частей тела; возвращает классы детекций |
 | GantMan NSFW | Официальный GantMan 1.2.0 `saved_model.tflite`; категории `drawings / hentai / neutral / porn / sexy`; TensorFlow Lite CPU |
 | NSFW Hub Detector | NSFW-классификатор из TensorFlow Hub |
+| MobileCLIP2-S0 | Лёгкий zero-shot классификатор общего назначения через OpenCLIP |
+| MobileCLIP2-S2 | Более тяжёлый/точный zero-shot классификатор через OpenCLIP |
+| RAM++ | Image tagging: выдаёт набор тегов объектов/сцен изображения |
 
 Обычный ImageNet MobileNetV2 и общий OpenImages TF Hub backend удалены из выбора: они не являются NSFW-классификаторами и давали несопоставимые с остальными моделями результаты.
 
@@ -119,7 +146,8 @@ OpenNSFW2 0.19+ используется через Keras 3 backend. TensorFlow 
 .cache/
 ├── downloads/     # исходные архивы, например GantMan
 ├── gantman/       # распакованная GantMan TFLite
-├── huggingface/   # Marqo / Freepik
+├── huggingface/   # Marqo / Freepik / MobileCLIP2
+├── rampp/         # RAM++ checkpoint (~3 GB)
 ├── opennsfw2/     # Yahoo/OpenNSFW2 weights
 └── tfhub/         # TensorFlow Hub
 ```
@@ -250,20 +278,37 @@ nsfw-analyzer
 │   ├── models_legacy.py       # Yahoo/GantMan/TF runtime helpers
 │   ├── models_extra.py        # Marqo / Freepik / NudeNet
 │   ├── general_ui.py           # вкладка общего классификатора
-│   ├── general_classifier.py   # MobileCLIP2 / OpenCLIP backend
+│   ├── general_classifier.py   # MobileCLIP2 S0/S2 + backend factory
 │   ├── general_categories.py   # дерево zero-shot категорий
+│   ├── rampp_backend.py         # изолированный RAM++ backend
+│   ├── rampp_worker.py          # persistent RAM++ worker
 │   ├── paths.py               # единые пути project-local cache
 │   └── utils.py               # общие утилиты и логирование
 ├── .cache/                     # локальный cache моделей (gitignored)
 ├── requirements.txt           # базовые зависимости
 ├── requirements-models.txt    # Marqo / Freepik / NudeNet
-├── requirements-general.txt   # MobileCLIP2 / OpenCLIP experiment
+├── requirements-general.txt   # MobileCLIP2 / OpenCLIP
+├── requirements-rampp.txt     # зависимости изолированного RAM++ runtime
+├── SETUP_RAMPP.cmd            # создание .venv-rampp
 ├── pyproject.toml             # метаданные пакета и Ruff
 ├── START.cmd                  # обычный запуск под Windows
 └── START_NVIDIA.cmd           # запуск с CUDA PyTorch для NVIDIA
 ```
 
 Старые каталоги `v1/` и `v3/` удалены: их история остаётся доступна в Git, а рабочая реализация теперь находится только в `src/`.
+
+## Что изменено в 2.6
+
+- добавлен MobileCLIP2-S2 рядом с S0;
+- во вкладке общего классификатора появился выбор backend `S0 / S2 / RAM++`;
+- добавлен отдельный столбец `Теги`;
+- RAM++ интегрирован как image-tagging backend через отдельный persistent worker;
+- RAM++ использует изолированное окружение `.venv-rampp`, чтобы старый `timm==0.4.12` не конфликтовал с OpenCLIP;
+- добавлен `SETUP_RAMPP.cmd` и отдельный `requirements-rampp.txt`;
+- RAM++ checkpoint хранится в project-local cache `.cache/rampp`;
+- при смене общего backend результаты очищаются, а предыдущая модель выгружается;
+- MobileCLIP освобождает CUDA cache при переключении backend;
+- версия приложения поднята до **2.6.0**.
 
 ## Что изменено в 2.5
 
@@ -318,7 +363,7 @@ nsfw-analyzer
 
 ## Лицензии сторонних моделей
 
-Код NSFW Analyzer Pro распространяется под MIT, но сторонние модели и библиотеки имеют собственные лицензии. В частности, у NudeNet есть несогласованность метаданных: его `setup.py` указывает MIT, тогда как файл `LICENSE` в репозитории содержит GNU AGPL-3.0. Перед распространением сборки, особенно коммерческим, проверьте требования лицензий используемых моделей и зависимостей.
+Код NSFW Analyzer Pro распространяется под MIT, но сторонние модели и библиотеки имеют собственные лицензии. RAM++ upstream распространяется под Apache License 2.0; MobileCLIP2 имеет собственные условия Apple AMLR. В частности, у NudeNet есть несогласованность метаданных: его `setup.py` указывает MIT, тогда как файл `LICENSE` в репозитории содержит GNU AGPL-3.0. Перед распространением сборки, особенно коммерческим, проверьте требования лицензий используемых моделей и зависимостей.
 
 ## Лицензия
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Callable
@@ -9,12 +10,39 @@ from PIL import Image
 from .general_categories import GENERAL_CATEGORIES
 from .paths import OPENCLIP_CACHE_DIR
 
-MODEL_NAME = "MobileCLIP2-S0"
-PRETRAINED_NAME = "dfndr2b"
-MODEL_REPO = "timm/MobileCLIP2-S0-OpenCLIP"
+MODEL_MOBILECLIP_S0 = "MobileCLIP2-S0"
+MODEL_MOBILECLIP_S2 = "MobileCLIP2-S2"
+MODEL_RAMPP = "RAM++"
+
+GENERAL_MODEL_CHOICES = (
+    MODEL_MOBILECLIP_S0,
+    MODEL_MOBILECLIP_S2,
+    MODEL_RAMPP,
+)
+
+MOBILECLIP_VARIANTS = {
+    MODEL_MOBILECLIP_S0: {
+        "model_name": "MobileCLIP2-S0",
+        "pretrained": "dfndr2b",
+        "repo_id": "timm/MobileCLIP2-S0-OpenCLIP",
+        "size_hint": "~300 MB",
+    },
+    MODEL_MOBILECLIP_S2: {
+        "model_name": "MobileCLIP2-S2",
+        "pretrained": "dfndr2b",
+        "repo_id": "timm/MobileCLIP2-S2-OpenCLIP",
+        "size_hint": "~400 MB",
+    },
+}
+
+
 class GeneralImageClassifier:
-    def __init__(self, log: Callable[[str], None]) -> None:
+    def __init__(self, log: Callable[[str], None], variant: str = MODEL_MOBILECLIP_S0) -> None:
+        if variant not in MOBILECLIP_VARIANTS:
+            raise ValueError(f"Неизвестная MobileCLIP-модель: {variant}")
         self.log = log
+        self.variant = variant
+        self.config = MOBILECLIP_VARIANTS[variant]
         self.model = None
         self.preprocess = None
         self.tokenizer = None
@@ -35,12 +63,14 @@ class GeneralImageClassifier:
         except ImportError as exc:
             raise RuntimeError(
                 "Для общего классификатора нужен OpenCLIP. "
-                "Запустите START.cmd / START_NVIDIA.cmd в экспериментальной ветке "
-                "или выполните: pip install -r requirements-general.txt"
+                "Запустите START.cmd / START_NVIDIA.cmd или выполните: "
+                "pip install -r requirements-general.txt"
             ) from exc
 
         OPENCLIP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        before = self._cache_size()
+        model_name = str(self.config["model_name"])
+        repo_id = str(self.config["repo_id"])
+        size_hint = str(self.config["size_hint"])
 
         class LogTqdm(tqdm):
             def __init__(progress_self, *args, **kwargs):
@@ -53,13 +83,13 @@ class GeneralImageClassifier:
                 if total:
                     percent = min(100, int(progress_self.n * 100 / total))
                     if percent >= progress_self._last_logged_percent + 10 or percent == 100:
-                        self.log(f"[General] загрузка MobileCLIP2: {percent}%\n")
+                        self.log(f"[General] загрузка {model_name}: {percent}%\n")
                         progress_self._last_logged_percent = percent
                 return result
 
         try:
             snapshot_download(
-                repo_id=MODEL_REPO,
+                repo_id=repo_id,
                 cache_dir=str(OPENCLIP_CACHE_DIR),
                 allow_patterns=("open_clip_model.safetensors",),
                 local_files_only=True,
@@ -70,16 +100,16 @@ class GeneralImageClassifier:
 
         if not weights_cached:
             self.log(
-                "[General] cache модели не найден. Скачиваем safetensors-веса "
-                "MobileCLIP2-S0 (~300 MB)...\n"
+                f"[General] cache {model_name} не найден. "
+                f"Скачиваем safetensors-веса ({size_hint})...\n"
             )
             snapshot_download(
-                repo_id=MODEL_REPO,
+                repo_id=repo_id,
                 cache_dir=str(OPENCLIP_CACHE_DIR),
                 allow_patterns=("open_clip_model.safetensors",),
                 tqdm_class=LogTqdm,
             )
-            self.log("[General] загрузка MobileCLIP2: 100% — веса сохранены\n")
+            self.log(f"[General] загрузка {model_name}: 100% — веса сохранены\n")
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         if self.device.type == "cuda":
@@ -87,19 +117,15 @@ class GeneralImageClassifier:
         else:
             self.device_name = "CPU"
 
-        self.log(
-            f"[General] MobileCLIP2-S0: подготовка модели | устройство: {self.device_name}\n"
-        )
-        if before:
-            self.log(f"[General] локальный cache найден: {before / 1024 / 1024:.1f} MB\n")
-
+        self.log(f"[General] {model_name}: подготовка | устройство: {self.device_name}\n")
         self.log("[General] инициализация OpenCLIP runtime...\n")
+
         model, _, preprocess = open_clip.create_model_and_transforms(
-            MODEL_NAME,
-            pretrained=PRETRAINED_NAME,
+            model_name,
+            pretrained=str(self.config["pretrained"]),
             cache_dir=str(OPENCLIP_CACHE_DIR),
         )
-        tokenizer = open_clip.get_tokenizer(MODEL_NAME)
+        tokenizer = open_clip.get_tokenizer(model_name)
 
         model = model.eval().to(self.device)
         prompts = [item.prompt for item in GENERAL_CATEGORIES]
@@ -114,12 +140,7 @@ class GeneralImageClassifier:
         self.tokenizer = tokenizer
         self.text_features = text_features
         self.torch = torch
-
-        after = self._cache_size()
-        self.log(
-            f"[General] MobileCLIP2-S0 готова | cache: {after / 1024 / 1024:.1f} MB "
-            f"| {self.device_name}\n"
-        )
+        self.log(f"[General] {model_name} готова | {self.device_name}\n")
 
     def classify(self, image_path: str) -> dict[str, str | float]:
         self.load()
@@ -150,27 +171,42 @@ class GeneralImageClassifier:
         ]
 
         best, score = top[0]
-        tags = ", ".join(f"{item.subcategory} {prob * 100:.1f}%" for item, prob in top)
+        top5 = ", ".join(f"{item.subcategory} {prob * 100:.1f}%" for item, prob in top)
         return {
             "kind": best.kind,
             "category": best.category,
             "subcategory": best.subcategory,
             "score": score,
-            "tags": tags,
+            "top5": top5,
+            "tags": "",
         }
+
+    def unload(self) -> None:
+        torch = self.torch
+        self.model = None
+        self.preprocess = None
+        self.tokenizer = None
+        self.text_features = None
+        self.device = None
+        self.torch = None
+        gc.collect()
+        if torch is not None:
+            try:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
 
     @staticmethod
     def cache_dir() -> Path:
         return OPENCLIP_CACHE_DIR
 
-    def _cache_size(self) -> int:
-        if not OPENCLIP_CACHE_DIR.exists():
-            return 0
-        total = 0
-        try:
-            for path in OPENCLIP_CACHE_DIR.rglob("*"):
-                if path.is_file():
-                    total += path.stat().st_size
-        except OSError:
-            pass
-        return total
+
+def create_general_backend(name: str, log: Callable[[str], None]):
+    if name == MODEL_RAMPP:
+        from .rampp_backend import RAMPlusPlusBackend
+
+        return RAMPlusPlusBackend(log)
+    if name in MOBILECLIP_VARIANTS:
+        return GeneralImageClassifier(log, name)
+    raise ValueError(f"Неизвестный backend общего классификатора: {name}")

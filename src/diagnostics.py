@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,8 @@ from .paths import (
     HUGGINGFACE_CACHE_DIR,
     OPENCLIP_CACHE_DIR,
     OPENNSFW2_WEIGHTS,
+    PROJECT_ROOT,
+    RAMPP_CACHE_DIR,
     TFHUB_CACHE_DIR,
 )
 
@@ -62,6 +65,25 @@ def _module_line(label: str, module_name: str, install_hint: str = "") -> str:
         return f"  ✅ {label}: установлен"
     suffix = f" — {install_hint}" if install_hint else ""
     return f"  ❌ {label}: не установлен{suffix}"
+
+
+def _rampp_runtime_line() -> str:
+    override = os.getenv("NSFW_ANALYZER_RAMPP_PYTHON")
+    if override:
+        path = Path(os.path.expandvars(os.path.expanduser(override))).resolve()
+        if path.exists():
+            return f"  ✅ RAM++ runtime: {path}"
+        return f"  ❌ RAM++ runtime: NSFW_ANALYZER_RAMPP_PYTHON не найден ({path})"
+
+    candidates = (
+        PROJECT_ROOT / ".venv-rampp" / "Scripts" / "python.exe",
+        PROJECT_ROOT / ".venv-rampp" / "bin" / "python",
+    )
+    for path in candidates:
+        if path.exists():
+            return f"  ✅ RAM++ runtime: {path}"
+
+    return "  ❌ RAM++ runtime: не установлен — запустите SETUP_RAMPP.cmd"
 
 
 def _nudenet_line() -> str:
@@ -162,7 +184,8 @@ def build_startup_report() -> str:
         _cached_line("Yahoo/OpenNSFW2", OPENNSFW2_WEIGHTS),
         _cached_line("Marqo Fast", _hf_repo_dir("Marqo/nsfw-image-detection-384")),
         _cached_line("Freepik 4-Level", _hf_repo_dir("Freepik/nsfw_image_detector")),
-        _cached_line("MobileCLIP2-S0 (эксперимент)", OPENCLIP_CACHE_DIR),
+        _cached_line("MobileCLIP2-S0/S2", OPENCLIP_CACHE_DIR),
+        _cached_line("RAM++ checkpoint", RAMPP_CACHE_DIR),
         _nudenet_line(),
         (
             f"  ✅ GantMan: кэш найден ({_format_size(_size_bytes(gantman))})"
@@ -180,6 +203,7 @@ def build_startup_report() -> str:
         _module_line("TensorFlow Hub", "tensorflow_hub", "запустите START.cmd / START_NVIDIA.cmd"),
         _module_line("PyTorch", "torch"),
         _module_line("OpenCLIP", "open_clip", "pip install -r requirements-general.txt"),
+        _rampp_runtime_line(),
         _module_line("ONNX Runtime", "onnxruntime"),
         "",
         "CUDA:",
