@@ -47,6 +47,7 @@ def scan_folder_async(self: Any, folder_path: str) -> None:
                     dt.datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
                     "",
                     "",
+                    "",
                 )
             )
             if len(batch) >= 100:
