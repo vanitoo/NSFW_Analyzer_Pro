@@ -63,21 +63,18 @@ class GeneralClassifierTab:
         self.browse_button = tk.Button(controls, text="Обзор", command=self.browse_folder)
         self.browse_button.grid(row=0, column=2, padx=4)
 
-        self.scan_button = tk.Button(controls, text="Сканировать", command=self.start_scan)
-        self.scan_button.grid(row=0, column=3, padx=4)
-
         self.classify_button = tk.Button(
             controls,
             text="Классифицировать",
             command=self.toggle_classification,
             state=tk.DISABLED,
         )
-        self.classify_button.grid(row=0, column=4, padx=4)
+        self.classify_button.grid(row=0, column=3, padx=4)
 
         tk.Label(
             controls,
             text="Модель: MobileCLIP2-S0 / OpenCLIP",
-        ).grid(row=0, column=5, padx=10)
+        ).grid(row=0, column=4, columnspan=2, padx=10)
 
         tk.Label(controls, text="Тип:").grid(row=1, column=0, padx=4, pady=(6, 0))
         self.kind_filter = tk.StringVar(value="Все типы")
@@ -194,8 +191,10 @@ class GeneralClassifierTab:
 
     def browse_folder(self) -> None:
         folder = filedialog.askdirectory(parent=self.dialog_parent)
-        if folder:
-            self.folder_var.set(folder)
+        if not folder:
+            return
+        self.folder_var.set(folder)
+        self.start_scan()
 
     def start_scan(self) -> None:
         folder = self.folder_var.get().strip()
@@ -209,7 +208,6 @@ class GeneralClassifierTab:
         self.tree.delete(*self.tree.get_children())
         self._reset_filters()
         self.classify_button.config(state=tk.DISABLED)
-        self.scan_button.config(state=tk.DISABLED)
         self.browse_button.config(state=tk.DISABLED)
         self.status_var.set("Сканирование...")
 
@@ -233,7 +231,6 @@ class GeneralClassifierTab:
             return
 
         self.stop_analysis = False
-        self.scan_button.config(state=tk.DISABLED)
         self.browse_button.config(state=tk.DISABLED)
         self.classify_button.config(text="Остановить", state=tk.NORMAL)
         self.progress["maximum"] = len(self.all_files)
@@ -323,13 +320,11 @@ class GeneralClassifierTab:
                     count = int(task[1])
                     self.progress["value"] = count
                     self.status_var.set(f"Найдено {count} изображений")
-                    self.scan_button.config(state=tk.NORMAL)
                     self.browse_button.config(state=tk.NORMAL)
                     self.classify_button.config(state=tk.NORMAL if count else tk.DISABLED)
 
                 elif event == "scan_cancelled":
                     self.status_var.set(f"Сканирование остановлено ({task[1]})")
-                    self.scan_button.config(state=tk.NORMAL)
                     self.browse_button.config(state=tk.NORMAL)
 
                 elif event == "general_result":
@@ -340,7 +335,6 @@ class GeneralClassifierTab:
                     self._refresh_filter_values()
                     self.apply_filter()
                     self.classify_thread = None
-                    self.scan_button.config(state=tk.NORMAL)
                     self.browse_button.config(state=tk.NORMAL)
                     self.classify_button.config(text="Классифицировать", state=tk.NORMAL)
                     if stopped:
@@ -350,7 +344,6 @@ class GeneralClassifierTab:
 
                 elif event == "classification_error":
                     self.classify_thread = None
-                    self.scan_button.config(state=tk.NORMAL)
                     self.browse_button.config(state=tk.NORMAL)
                     self.classify_button.config(text="Классифицировать", state=tk.NORMAL)
                     self.status_var.set("Ошибка общего классификатора")
