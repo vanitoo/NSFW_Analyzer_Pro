@@ -16,8 +16,8 @@ from .models_extra import (
     initialize_extra_model,
     release_extra_model,
 )
-from .models_legacy import initialize_gantman, tensorflow_device_name
-from .paths import CACHE_DIR, OPENNSFW2_WEIGHTS
+from .models_legacy import ensure_opennsfw2_weights, initialize_gantman, tensorflow_device_name
+from .paths import CACHE_DIR
 from .utils import get_cpu_cores
 
 MODEL_YAHOO = "Yahoo NSFW"
@@ -31,6 +31,27 @@ MODEL_CHOICES = (
     MODEL_GANTMAN,
     MODEL_HUB,
 )
+
+HUB_LABELS = ("drawings", "hentai", "neutral", "porn", "sexy")
+MODEL_CATEGORY_CHOICES = {
+    MODEL_YAHOO: ("NSFW", "SFW"),
+    MODEL_MARQO: ("NSFW", "SFW"),
+    MODEL_FREEPIK: ("neutral", "low", "medium", "high"),
+    MODEL_NUDENET: (
+        "ANUS_EXPOSED",
+        "BUTTOCKS_EXPOSED",
+        "FEMALE_BREAST_EXPOSED",
+        "FEMALE_GENITALIA_EXPOSED",
+        "MALE_GENITALIA_EXPOSED",
+        "no explicit detections",
+    ),
+    MODEL_GANTMAN: HUB_LABELS,
+    MODEL_HUB: HUB_LABELS,
+}
+
+STATUS_NUDE = "НЮ"
+STATUS_SAFE = "Безопасно"
+STATUS_BAD = "BAD"
 
 
 def _emit(self: Any, event: str, *payload: Any) -> None:
@@ -92,12 +113,14 @@ def initialize_model(self: Any, model_name: str) -> None:
             if normalized == "yahoo":
                 import opennsfw2
 
+                weights_path = ensure_opennsfw2_weights(self, _log)
                 self.model = opennsfw2
-                weights_path = str(OPENNSFW2_WEIGHTS)
-                self.predict_fn = lambda path: (
-                    float(opennsfw2.predict_image(path, weights_path=weights_path)),
-                    None,
-                )
+
+                def predict_yahoo(path: str) -> tuple[float, str | None]:
+                    score = float(opennsfw2.predict_image(path, weights_path=weights_path))
+                    return score, "NSFW" if score >= 0.5 else "SFW"
+
+                self.predict_fn = predict_yahoo
 
             elif normalized in {"marqo", "freepik", "nudenet"}:
                 initialize_extra_model(self, normalized, _log)
@@ -122,7 +145,8 @@ def initialize_model(self: Any, model_name: str) -> None:
                     if preds.size < 5:
                         raise RuntimeError(f"Неожиданный размер выхода NSFW Hub: {preds.shape}")
                     score = float(max(preds[1], preds[3], preds[4]))
-                    return score, None
+                    label_index = int(np.argmax(preds[: len(HUB_LABELS)]))
+                    return score, HUB_LABELS[label_index]
 
                 self.predict_fn = predict_hub
                 self.compute_device, self.inference_workers = tensorflow_device_name()
@@ -136,6 +160,18 @@ def initialize_model(self: Any, model_name: str) -> None:
             self.predict_fn = None
             self.model_name = None
             raise
+
+
+def reset_model(self: Any) -> None:
+    """Release the current backend when the user switches models."""
+    if not hasattr(self, "model_lock"):
+        self.model_lock = threading.Lock()
+
+    with self.model_lock:
+        self.model = None
+        self.predict_fn = None
+        self.model_name = None
+        release_extra_model(self)
 
 
 def is_nude_image(
@@ -219,27 +255,32 @@ def analyze_images(
             item_id, img_path, score, decision, bad_flag, category, elapsed_ms = result
             processed += 1
 
-            if bad_flag == "BAD" or decision is None:
+            if bad_flag == STATUS_BAD or decision is None:
                 bad_count += 1
-                status = "BAD"
+                status = STATUS_BAD
                 tag = "bad"
-                detail = "BAD"
+                detail = STATUS_BAD
             elif decision:
                 nude_count += 1
-                status = "✓"
+                status = STATUS_NUDE
                 tag = "nude"
-                detail = "НЮ"
+                detail = STATUS_NUDE
             else:
                 safe_count += 1
-                status = "✗"
+                status = STATUS_SAFE
                 tag = "safe"
-                detail = "безопасно"
+                detail = STATUS_SAFE
 
             _emit(
                 self,
                 "update_item",
                 item_id,
-                {"Оценка": f"{score:.4f}", "Статус": status, "tag": tag},
+                {
+                    "Оценка": f"{score:.4f}",
+                    "Статус": status,
+                    "Категория": category or "",
+                    "tag": tag,
+                },
             )
             category_text = f" | категория: {category}" if category else ""
             _log(
