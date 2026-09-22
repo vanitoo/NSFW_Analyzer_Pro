@@ -15,8 +15,8 @@ from .scanner import scan_folder_async
 from .utils import log_message
 
 
-class GeneralClassifierWindow:
-    """Experimental general-purpose image organizer in an isolated Toplevel."""
+class GeneralClassifierTab:
+    """Experimental general-purpose image organizer embedded in the main notebook."""
 
     COLUMNS = (
         "#",
@@ -31,12 +31,10 @@ class GeneralClassifierWindow:
         "Топ-5",
     )
 
-    def __init__(self, parent: tk.Misc, initial_folder: str = "") -> None:
-        self.window = tk.Toplevel(parent)
-        self.window.title("Общий классификатор изображений — эксперимент")
-        self.window.geometry("1500x850")
-        self.window.minsize(1100, 650)
-        self.window.protocol("WM_DELETE_WINDOW", self.on_close)
+    def __init__(self, parent: tk.Misc, folder_var: tk.StringVar) -> None:
+        self.parent = parent
+        self.dialog_parent = parent.winfo_toplevel()
+        self.folder_var = folder_var
 
         self.running = True
         self.stop_analysis = False
@@ -49,19 +47,16 @@ class GeneralClassifierWindow:
         self.path_to_item: dict[str, str] = {}
 
         self._create_widgets()
-        if initial_folder:
-            self.path_entry.insert(0, initial_folder)
-
-        self.window.after(100, self.process_queue)
+        self.parent.after(100, self.process_queue)
         self.status_var.set("Выберите папку и нажмите «Сканировать»")
 
     def _create_widgets(self) -> None:
-        controls = tk.Frame(self.window)
+        controls = tk.Frame(self.parent)
         controls.pack(fill=tk.X, padx=6, pady=6)
         controls.columnconfigure(1, weight=1)
 
         tk.Label(controls, text="Папка:").grid(row=0, column=0, padx=4)
-        self.path_entry = tk.Entry(controls)
+        self.path_entry = tk.Entry(controls, textvariable=self.folder_var)
         self.path_entry.grid(row=0, column=1, padx=4, sticky="ew")
 
         self.browse_button = tk.Button(controls, text="Обзор", command=self.browse_folder)
@@ -119,7 +114,7 @@ class GeneralClassifierWindow:
         self.subcategory_combo.grid(row=1, column=5, padx=4, pady=(6, 0), sticky="w")
         self.subcategory_combo.bind("<<ComboboxSelected>>", self.apply_filter)
 
-        main = tk.PanedWindow(self.window, orient=tk.HORIZONTAL)
+        main = tk.PanedWindow(self.parent, orient=tk.HORIZONTAL)
         main.pack(fill=tk.BOTH, expand=True)
 
         left = tk.PanedWindow(main, orient=tk.VERTICAL)
@@ -161,7 +156,9 @@ class GeneralClassifierWindow:
             self.tree.column(
                 column,
                 width=widths[column],
-                anchor="center" if column in {"#", "Тип", "Категория", "Подкатегория", "Score"} else "w",
+                anchor="center"
+                if column in {"#", "Тип", "Категория", "Подкатегория", "Score"}
+                else "w",
             )
 
         log_frame = tk.LabelFrame(left, text="Лог")
@@ -174,7 +171,7 @@ class GeneralClassifierWindow:
         self.preview_label = tk.Label(preview_frame, text="Выберите изображение")
         self.preview_label.pack(fill=tk.BOTH, expand=True)
 
-        status_frame = tk.Frame(self.window, bd=1, relief=tk.SUNKEN)
+        status_frame = tk.Frame(self.parent, bd=1, relief=tk.SUNKEN)
         status_frame.pack(fill=tk.X, side=tk.BOTTOM)
         self.status_var = tk.StringVar()
         tk.Label(status_frame, textvariable=self.status_var, anchor="w").pack(
@@ -191,16 +188,14 @@ class GeneralClassifierWindow:
         self.tree.bind("<Return>", self.open_image)
 
     def browse_folder(self) -> None:
-        folder = filedialog.askdirectory(parent=self.window)
-        if not folder:
-            return
-        self.path_entry.delete(0, tk.END)
-        self.path_entry.insert(0, folder)
+        folder = filedialog.askdirectory(parent=self.dialog_parent)
+        if folder:
+            self.folder_var.set(folder)
 
     def start_scan(self) -> None:
-        folder = self.path_entry.get().strip()
+        folder = self.folder_var.get().strip()
         if not folder:
-            messagebox.showerror("Ошибка", "Выберите папку", parent=self.window)
+            messagebox.showerror("Ошибка", "Выберите папку", parent=self.dialog_parent)
             return
 
         self.stop_analysis = False
@@ -354,13 +349,13 @@ class GeneralClassifierWindow:
                     self.browse_button.config(state=tk.NORMAL)
                     self.classify_button.config(text="Классифицировать", state=tk.NORMAL)
                     self.status_var.set("Ошибка общего классификатора")
-                    messagebox.showerror("MobileCLIP2", task[1], parent=self.window)
+                    messagebox.showerror("MobileCLIP2", task[1], parent=self.dialog_parent)
 
         except queue.Empty:
             pass
 
-        if self.running and self.window.winfo_exists():
-            self.window.after(100, self.process_queue)
+        if self.running and self.parent.winfo_exists():
+            self.parent.after(100, self.process_queue)
 
     def _insert_row(self, row: list) -> None:
         item = self.tree.insert("", "end", values=row)
@@ -430,7 +425,9 @@ class GeneralClassifierWindow:
         try:
             with Image.open(path) as image:
                 image = image.convert("RGB")
-                image.thumbnail((310, 700), Image.Resampling.LANCZOS)
+                preview_width = max(1, self.parent.winfo_width() // 4)
+                preview_height = max(1, self.parent.winfo_height() - 170)
+                image.thumbnail((preview_width, preview_height), Image.Resampling.LANCZOS)
                 tk_image = ImageTk.PhotoImage(image.copy())
             self.preview_label.config(image=tk_image, text="")
             self.preview_label.image = tk_image
@@ -454,9 +451,8 @@ class GeneralClassifierWindow:
             else:
                 subprocess.Popen(("xdg-open", path))
         except OSError as exc:
-            messagebox.showerror("Ошибка", str(exc), parent=self.window)
+            messagebox.showerror("Ошибка", str(exc), parent=self.dialog_parent)
 
-    def on_close(self) -> None:
+    def shutdown(self) -> None:
         self.running = False
         self.stop_analysis = True
-        self.window.destroy()
