@@ -32,9 +32,9 @@ if errorlevel 1 (
 )
 
 echo Installing isolated RAM++ dependencies...
-python -m pip install "timm==0.4.12" "transformers>=4.25.1,<5.0" "fairscale==0.4.4" scipy Pillow || exit /b 1
+python -m pip install -r requirements-rampp.txt || exit /b 1
 python -m pip install "clip @ git+https://github.com/openai/CLIP.git" || exit /b 1
-python -m pip install --no-deps "git+https://github.com/xinyu1205/recognize-anything.git" || exit /b 1
+python -m pip install --no-deps "git+https://github.com/xinyu1205/recognize-anything.git@7cb804a8609e9f4b1a50b7f31436d2df40bb9481" || exit /b 1
 
 echo.
 python -c "import torch; from ram.models import ram_plus; print('RAM++ runtime OK'); print('CUDA:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU only')" || exit /b 1
