@@ -56,6 +56,13 @@ def _cached_line(name: str, path: Path) -> str:
     return f"  ⬇ {name}: кэш не загружен"
 
 
+def _module_line(label: str, module_name: str, install_hint: str = "") -> str:
+    if importlib.util.find_spec(module_name) is not None:
+        return f"  ✅ {label}: установлен"
+    suffix = f" — {install_hint}" if install_hint else ""
+    return f"  ❌ {label}: не установлен{suffix}"
+
+
 def _nudenet_line() -> str:
     spec = importlib.util.find_spec("nudenet")
     if spec is None:
@@ -165,6 +172,12 @@ def build_startup_report() -> str:
             if tfhub_cached
             else "  ⬇ NSFW Hub: кэш не загружен"
         ),
+        "",
+        "Runtime:",
+        _module_line("TensorFlow", "tensorflow"),
+        _module_line("TensorFlow Hub", "tensorflow_hub", "запустите START.cmd / START_NVIDIA.cmd"),
+        _module_line("PyTorch", "torch"),
+        _module_line("ONNX Runtime", "onnxruntime"),
         "",
         "CUDA:",
         _nvidia_smi_line(),
