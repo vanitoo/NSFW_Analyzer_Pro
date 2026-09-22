@@ -35,6 +35,7 @@ jobs:
           test -f src/rampp_worker.py
           test -f SETUP_RAMPP.cmd
           test -f requirements-general.txt
+          test -f requirements-rampp.txt
           test ! -e ui.py
           test ! -e v1
           test ! -e v3
