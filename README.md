@@ -20,6 +20,51 @@
 - фоновое сканирование и анализ без прямого доступа worker-потоков к Tkinter;
 - журнал `analyzer_nu.log`.
 
+## Эксперимент: общий классификатор изображений
+
+В ветке `feature/general-image-classifier` добавлен отдельный экспериментальный режим, который **не заменяет NSFW-анализатор**. Он открывается кнопкой **«Общий классификатор (эксперимент)»** в основном окне.
+
+Используется **MobileCLIP2-S0 через OpenCLIP**. Это zero-shot image classifier: категории задаются текстовыми описаниями, поэтому для добавления новых классов не требуется переобучение модели.
+
+Первый набор категорий:
+
+- документы: паспорт, удостоверение, чек, счёт/инвойс, договор, сертификат, текстовый документ;
+- цифровое: интерфейс программы, веб-страница, чат, код/терминал, игра;
+- люди: портрет, группа, семья;
+- природа: горы, море/океан, пляж, лес, река/озеро, закат/рассвет, снег/зима;
+- транспорт: автомобиль, мотоцикл, самолёт, поезд, корабль/лодка;
+- животные: кошка, собака, птица, дикие животные;
+- еда и напитки;
+- архитектура: здания, город/улица, интерьер;
+- предметы: электроника, одежда, домашние предметы;
+- графика: рисунки, мемы, инфографика.
+
+Результат общего классификатора хранится отдельно от NSFW-результатов:
+
+```text
+Тип | Категория | Подкатегория | Score | Топ-5
+```
+
+Например:
+
+```text
+Фото | Природа | Горы | 0.73 | Горы 73%, Снег / зима 12%, Река / озеро 6% ...
+```
+
+или:
+
+```text
+Документ | Документы | Паспорт | 0.61 | Паспорт 61%, Удостоверение личности 22% ...
+```
+
+При первом запуске MobileCLIP2-S0 скачивает около 300 MB safetensors-весов в project-local cache:
+
+```text
+.cache/huggingface/open_clip/
+```
+
+Для экспериментального режима добавлен отдельный файл зависимостей `requirements-general.txt`. `START.cmd` и `START_NVIDIA.cmd` в этой ветке устанавливают его автоматически.
+
 ## Модели
 
 | Модель | Назначение |
@@ -155,6 +200,7 @@ source .venv/bin/activate
 ```bash
 python -m pip install -r requirements.txt
 python -m pip install -r requirements-models.txt
+python -m pip install -r requirements-general.txt
 python main.py
 ```
 
@@ -193,11 +239,15 @@ nsfw-analyzer
 │   ├── analyzer.py            # маршрутизация моделей и анализ
 │   ├── models_legacy.py       # Yahoo/GantMan/TF runtime helpers
 │   ├── models_extra.py        # Marqo / Freepik / NudeNet
+│   ├── general_ui.py           # отдельное окно общего классификатора
+│   ├── general_classifier.py   # MobileCLIP2 / OpenCLIP backend
+│   ├── general_categories.py   # дерево zero-shot категорий
 │   ├── paths.py               # единые пути project-local cache
 │   └── utils.py               # общие утилиты и логирование
 ├── .cache/                     # локальный cache моделей (gitignored)
 ├── requirements.txt           # базовые зависимости
 ├── requirements-models.txt    # Marqo / Freepik / NudeNet
+├── requirements-general.txt   # MobileCLIP2 / OpenCLIP experiment
 ├── pyproject.toml             # метаданные пакета и Ruff
 ├── START.cmd                  # обычный запуск под Windows
 └── START_NVIDIA.cmd           # запуск с CUDA PyTorch для NVIDIA
