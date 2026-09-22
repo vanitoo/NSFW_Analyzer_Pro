@@ -130,7 +130,14 @@ def initialize_model(self: Any, model_name: str) -> None:
 
             elif normalized == "nsfw_hub":
                 import tensorflow as tf
-                import tensorflow_hub as hub
+                try:
+                    import tensorflow_hub as hub
+                except ImportError as exc:
+                    raise RuntimeError(
+                        "Не установлен tensorflow-hub. Запустите START.cmd или START_NVIDIA.cmd "
+                        "из корня проекта, либо выполните: "
+                        ".venv\\Scripts\\python.exe -m pip install tensorflow-hub==0.16.1"
+                    ) from exc
 
                 hub_cached = False
                 try:
