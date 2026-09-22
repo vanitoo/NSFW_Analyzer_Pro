@@ -3,6 +3,12 @@ setlocal
 cd /d "%~dp0"
 title NSFW Analyzer Pro - RAM++ Runtime Setup
 
+where git >nul 2>nul
+if errorlevel 1 (
+    echo Git not found. Install Git for Windows and run this script again.
+    exit /b 1
+)
+
 set "PYTHON_CMD=python"
 where py >nul 2>nul
 if not errorlevel 1 (
