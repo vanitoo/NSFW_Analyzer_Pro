@@ -30,6 +30,8 @@ class GeneralImageClassifier:
         try:
             import open_clip
             import torch
+            from huggingface_hub import snapshot_download
+            from tqdm.auto import tqdm
         except ImportError as exc:
             raise RuntimeError(
                 "Для общего классификатора нужен OpenCLIP. "
@@ -39,6 +41,45 @@ class GeneralImageClassifier:
 
         OPENCLIP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         before = self._cache_size()
+
+        class LogTqdm(tqdm):
+            def __init__(progress_self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                progress_self._last_logged_percent = -10
+
+            def update(progress_self, n=1):
+                result = super().update(n)
+                total = progress_self.total or 0
+                if total:
+                    percent = min(100, int(progress_self.n * 100 / total))
+                    if percent >= progress_self._last_logged_percent + 10 or percent == 100:
+                        self.log(f"[General] загрузка MobileCLIP2: {percent}%\n")
+                        progress_self._last_logged_percent = percent
+                return result
+
+        try:
+            snapshot_download(
+                repo_id=MODEL_REPO,
+                cache_dir=str(OPENCLIP_CACHE_DIR),
+                allow_patterns=("open_clip_model.safetensors",),
+                local_files_only=True,
+            )
+            weights_cached = True
+        except Exception:
+            weights_cached = False
+
+        if not weights_cached:
+            self.log(
+                "[General] cache модели не найден. Скачиваем safetensors-веса "
+                "MobileCLIP2-S0 (~300 MB)...\n"
+            )
+            snapshot_download(
+                repo_id=MODEL_REPO,
+                cache_dir=str(OPENCLIP_CACHE_DIR),
+                allow_patterns=("open_clip_model.safetensors",),
+                tqdm_class=LogTqdm,
+            )
+            self.log("[General] загрузка MobileCLIP2: 100% — веса сохранены\n")
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         if self.device.type == "cuda":
@@ -51,12 +92,8 @@ class GeneralImageClassifier:
         )
         if before:
             self.log(f"[General] локальный cache найден: {before / 1024 / 1024:.1f} MB\n")
-        else:
-            self.log(
-                "[General] cache модели не найден. OpenCLIP скачает MobileCLIP2-S0 "
-                "(около 300 MB весов) в cache проекта.\n"
-            )
 
+        self.log("[General] инициализация OpenCLIP runtime...\n")
         model, _, preprocess = open_clip.create_model_and_transforms(
             MODEL_NAME,
             pretrained=PRETRAINED_NAME,
