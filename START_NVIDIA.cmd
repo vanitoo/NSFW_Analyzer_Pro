@@ -36,6 +36,9 @@ python -m pip install -r requirements.txt || exit /b 1
 echo Installing additional NSFW models...
 python -m pip install -r requirements-models.txt || exit /b 1
 
+echo Installing experimental general classifier...
+python -m pip install -r requirements-general.txt || exit /b 1
+
 echo Installing clean CUDA ONNX Runtime...
 python -m pip uninstall -y onnxruntime onnxruntime-gpu >nul 2>nul
 python -m pip install --no-cache-dir "onnxruntime-gpu[cuda,cudnn]==1.26.0" || exit /b 1
