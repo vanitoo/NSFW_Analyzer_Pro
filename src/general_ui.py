@@ -45,6 +45,7 @@ class GeneralClassifierTab:
 
         self.all_files: list[list] = []
         self.path_to_item: dict[str, str] = {}
+        self._sort_reverse: dict[str, bool] = {}
 
         self._create_widgets()
         self.parent.after(100, self.process_queue)
@@ -100,7 +101,7 @@ class GeneralClassifierTab:
             width=20,
         )
         self.category_combo.grid(row=1, column=3, padx=4, pady=(6, 0), sticky="w")
-        self.category_combo.bind("<<ComboboxSelected>>", self.apply_filter)
+        self.category_combo.bind("<<ComboboxSelected>>", self.on_category_filter_changed)
 
         tk.Label(controls, text="Подкатегория:").grid(row=1, column=4, padx=4, pady=(6, 0))
         self.subcategory_filter = tk.StringVar(value="Все подкатегории")
@@ -152,7 +153,11 @@ class GeneralClassifierTab:
             "Топ-5": 390,
         }
         for column in self.COLUMNS:
-            self.tree.heading(column, text=column)
+            self.tree.heading(
+                column,
+                text=column,
+                command=lambda current=column: self.sort_treeview_column(current),
+            )
             self.tree.column(
                 column,
                 width=widths[column],
@@ -391,10 +396,94 @@ class GeneralClassifierTab:
     def _refresh_filter_values(self) -> None:
         kinds = sorted({str(row[5]) for row in self.all_files if str(row[5])})
         categories = sorted({str(row[6]) for row in self.all_files if str(row[6])})
-        subcategories = sorted({str(row[7]) for row in self.all_files if str(row[7])})
         self.kind_combo["values"] = ("Все типы", *kinds)
         self.category_combo["values"] = ("Все категории", *categories)
-        self.subcategory_combo["values"] = ("Все подкатегории", *subcategories)
+        self._refresh_subcategory_values()
+
+    def _refresh_subcategory_values(self) -> None:
+        category = self.category_filter.get()
+        if category == "Все категории":
+            subcategories = sorted(
+                {str(row[7]) for row in self.all_files if str(row[7])}
+            )
+        else:
+            subcategories = sorted(
+                {
+                    str(row[7])
+                    for row in self.all_files
+                    if str(row[6]) == category and str(row[7])
+                }
+            )
+
+        current = self.subcategory_filter.get()
+        values = ("Все подкатегории", *subcategories)
+        self.subcategory_combo["values"] = values
+
+        if current not in values:
+            self.subcategory_filter.set("Все подкатегории")
+
+    def on_category_filter_changed(self, _event=None) -> None:
+        self._refresh_subcategory_values()
+        self.apply_filter()
+
+    @staticmethod
+    def _parse_size(value: str) -> float:
+        parts = str(value).replace(",", ".").split()
+        if not parts:
+            return 0.0
+        try:
+            number = float(parts[0])
+        except ValueError:
+            return 0.0
+
+        unit = parts[1].upper() if len(parts) > 1 else "B"
+        multipliers = {
+            "B": 1.0,
+            "KB": 1024.0,
+            "MB": 1024.0**2,
+            "GB": 1024.0**3,
+            "TB": 1024.0**4,
+        }
+        return number * multipliers.get(unit, 1.0)
+
+    def _sort_value(self, column: str, value: str):
+        text = str(value).strip()
+        if column == "#":
+            try:
+                return (0, int(text))
+            except ValueError:
+                return (1, text.casefold())
+        if column == "Score":
+            try:
+                return (0, float(text.replace(",", ".")))
+            except ValueError:
+                return (1, -1.0)
+        if column == "Размер":
+            return (0, self._parse_size(text))
+        return (0, text.casefold())
+
+    def sort_treeview_column(self, column: str) -> None:
+        reverse = not self._sort_reverse.get(column, False)
+        self._sort_reverse[column] = reverse
+
+        rows = [
+            (self._sort_value(column, self.tree.set(item, column)), item)
+            for item in self.tree.get_children("")
+        ]
+        rows.sort(key=lambda pair: pair[0], reverse=reverse)
+
+        for position, (_, item) in enumerate(rows):
+            self.tree.move(item, "", position)
+
+        for current in self.COLUMNS:
+            marker = ""
+            if current == column:
+                marker = " ▼" if reverse else " ▲"
+            self.tree.heading(
+                current,
+                text=f"{current}{marker}",
+                command=lambda selected=current: self.sort_treeview_column(selected),
+            )
 
     def apply_filter(self, _event=None) -> None:
         kind = self.kind_filter.get()
