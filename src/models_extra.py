@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
+from .paths import HUGGINGFACE_CACHE_DIR
+
 MODEL_MARQO = "Marqo Fast"
 MODEL_FREEPIK = "Freepik 4-Level"
 MODEL_NUDENET = "NudeNet Detector"
@@ -34,6 +36,79 @@ def release_extra_model(self: Any) -> None:
             pass
 
 
+def _hf_repo_cache_dir(repo_id: str) -> Path:
+    return HUGGINGFACE_CACHE_DIR / "hub" / ("models--" + repo_id.replace("/", "--"))
+
+
+def _ensure_hf_snapshot(
+    repo_id: str,
+    label: str,
+    log: Callable[[Any, str], None],
+    self: Any,
+) -> str:
+    try:
+        from huggingface_hub import snapshot_download
+        from tqdm.auto import tqdm
+    except ImportError as exc:
+        raise RuntimeError(
+            "Для загрузки Hugging Face моделей нужны huggingface_hub и tqdm."
+        ) from exc
+
+    cache_dir = HUGGINGFACE_CACHE_DIR / "hub"
+    repo_cache = _hf_repo_cache_dir(repo_id)
+
+    try:
+        snapshot = snapshot_download(
+            repo_id=repo_id,
+            cache_dir=str(cache_dir),
+            local_files_only=True,
+        )
+        log(self, f"[{label}] кэш модели найден: 100% — загрузка не требуется\n")
+        return str(snapshot)
+    except Exception:
+        pass
+
+    log(self, f"[{label}] кэш не найден, начинаем загрузку с Hugging Face.\n")
+
+    class LogTqdm(tqdm):
+        def __init__(progress_self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            progress_self._last_logged_percent = -10
+
+        def update(progress_self, n=1):
+            result = super().update(n)
+            total = progress_self.total or 0
+            if total:
+                percent = min(100, int(progress_self.n * 100 / total))
+                if (
+                    percent >= progress_self._last_logged_percent + 10
+                    or percent == 100
+                ):
+                    description = str(progress_self.desc or label).strip()
+                    log(self, f"[{label}] {description}: {percent}%\n")
+                    progress_self._last_logged_percent = percent
+            return result
+
+    snapshot = snapshot_download(
+        repo_id=repo_id,
+        cache_dir=str(cache_dir),
+        tqdm_class=LogTqdm,
+    )
+
+    size = 0
+    try:
+        size = sum(
+            item.stat().st_size
+            for item in repo_cache.rglob("*")
+            if item.is_file()
+        )
+    except OSError:
+        pass
+    size_text = f" ({size / 1024 / 1024:.1f} MB)" if size else ""
+    log(self, f"[{label}] загрузка: 100% — готово{size_text}\n")
+    return str(snapshot)
+
+
 def _torch_device() -> tuple[Any, str]:
     try:
         import torch
@@ -59,8 +134,13 @@ def _initialize_marqo(self: Any, log: Callable[[Any, str], None]) -> None:
         ) from exc
 
     device, device_name = _torch_device()
-    log(self, "[Marqo] При первом запуске веса (~22 MB) будут загружены с Hugging Face.\n")
-
+    _ensure_hf_snapshot(
+        "Marqo/nsfw-image-detection-384",
+        "Marqo",
+        log,
+        self,
+    )
+    log(self, "[Marqo] загрузка runtime: создаём модель...\n")
     model = timm.create_model("hf_hub:Marqo/nsfw-image-detection-384", pretrained=True)
     model = model.eval().to(device)
     data_config = timm.data.resolve_model_data_config(model)
@@ -85,6 +165,7 @@ def _initialize_marqo(self: Any, log: Callable[[Any, str], None]) -> None:
     self.predict_fn = predict
     self.compute_device = device_name
     self.inference_workers = 1 if device.type == "cuda" else 2
+    log(self, f"[Marqo] модель готова: 100% | {device_name}\n")
 
 
 def _initialize_freepik(self: Any, log: Callable[[Any, str], None]) -> None:
@@ -99,11 +180,16 @@ def _initialize_freepik(self: Any, log: Callable[[Any, str], None]) -> None:
 
     device, device_name = _torch_device()
     pipeline_device = device.index if device.type == "cuda" else -1
-    log(self, "[Freepik] При первом запуске веса (~173 MB) будут загружены с Hugging Face.\n")
-
+    snapshot_path = _ensure_hf_snapshot(
+        "Freepik/nsfw_image_detector",
+        "Freepik",
+        log,
+        self,
+    )
+    log(self, "[Freepik] загрузка runtime: создаём pipeline...\n")
     classifier = pipeline(
         "image-classification",
-        model="Freepik/nsfw_image_detector",
+        model=snapshot_path,
         device=pipeline_device,
     )
 
@@ -115,12 +201,13 @@ def _initialize_freepik(self: Any, log: Callable[[Any, str], None]) -> None:
         # Freepik documents medium-or-higher as the useful binary NSFW cut.
         score = min(1.0, scores.get("medium", 0.0) + scores.get("high", 0.0))
         category = max(scores, key=scores.get) if scores else "unknown"
-        return score, f"{category} (medium+high={score:.3f})"
+        return score, category
 
     self.model = classifier
     self.predict_fn = predict
     self.compute_device = device_name
     self.inference_workers = 1
+    log(self, f"[Freepik] модель готова: 100% | {device_name}\n")
 
 
 def _initialize_nudenet(self: Any, log: Callable[[Any, str], None]) -> None:
@@ -133,7 +220,7 @@ def _initialize_nudenet(self: Any, log: Callable[[Any, str], None]) -> None:
             "Для NudeNet нужны nudenet и onnxruntime. Выполните: pip install -r requirements-models.txt"
         ) from exc
 
-    log(self, "[NudeNet] Модель 320n входит в пакет; отдельная загрузка весов не нужна.\n")
+    log(self, "[NudeNet] загрузка: 100% — 320n.onnx уже входит в пакет.\n")
     if hasattr(ort, "preload_dlls"):
         try:
             ort.preload_dlls()
@@ -167,11 +254,8 @@ def _initialize_nudenet(self: Any, log: Callable[[Any, str], None]) -> None:
 
         explicit.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
         score = float(explicit[0].get("score", 0.0))
-        summary = ", ".join(
-            f"{item.get('class', '?')}:{float(item.get('score', 0.0)):.2f}"
-            for item in explicit[:3]
-        )
-        return score, summary
+        category = str(explicit[0].get("class", "unknown"))
+        return score, category
 
     self.model = detector
     self.predict_fn = predict
