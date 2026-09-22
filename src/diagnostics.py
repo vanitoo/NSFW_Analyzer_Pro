@@ -11,6 +11,8 @@ from .paths import (
     HUGGINGFACE_CACHE_DIR,
     OPENCLIP_CACHE_DIR,
     OPENNSFW2_WEIGHTS,
+    PROJECT_ROOT,
+    RAMPP_CACHE_DIR,
     TFHUB_CACHE_DIR,
 )
 
@@ -162,7 +164,8 @@ def build_startup_report() -> str:
         _cached_line("Yahoo/OpenNSFW2", OPENNSFW2_WEIGHTS),
         _cached_line("Marqo Fast", _hf_repo_dir("Marqo/nsfw-image-detection-384")),
         _cached_line("Freepik 4-Level", _hf_repo_dir("Freepik/nsfw_image_detector")),
-        _cached_line("MobileCLIP2-S0 (эксперимент)", OPENCLIP_CACHE_DIR),
+        _cached_line("MobileCLIP2-S0/S2", OPENCLIP_CACHE_DIR),
+        _cached_line("RAM++ checkpoint", RAMPP_CACHE_DIR),
         _nudenet_line(),
         (
             f"  ✅ GantMan: кэш найден ({_format_size(_size_bytes(gantman))})"
@@ -180,6 +183,14 @@ def build_startup_report() -> str:
         _module_line("TensorFlow Hub", "tensorflow_hub", "запустите START.cmd / START_NVIDIA.cmd"),
         _module_line("PyTorch", "torch"),
         _module_line("OpenCLIP", "open_clip", "pip install -r requirements-general.txt"),
+        (
+            "  ✅ RAM++ runtime: .venv-rampp найден"
+            if (
+                (PROJECT_ROOT / ".venv-rampp" / "Scripts" / "python.exe").exists()
+                or (PROJECT_ROOT / ".venv-rampp" / "bin" / "python").exists()
+            )
+            else "  ❌ RAM++ runtime: не установлен — запустите SETUP_RAMPP.cmd"
+        ),
         _module_line("ONNX Runtime", "onnxruntime"),
         "",
         "CUDA:",
