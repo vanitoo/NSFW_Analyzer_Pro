@@ -46,6 +46,7 @@ class NSFWAnalyzerApp:
 
         self.all_files: list[list] = []
         self._last_preview_path: str | None = None
+        self.general_window = None
 
         self._create_widgets()
         self.root.after(100, self.process_queue)
@@ -126,6 +127,13 @@ class NSFWAnalyzerApp:
         )
         self.category_filter_combobox.grid(row=1, column=3, columnspan=2, padx=5, pady=(5, 0), sticky="w")
         self.category_filter_combobox.bind("<<ComboboxSelected>>", self.apply_filter)
+
+        self.general_button = tk.Button(
+            self.control_frame,
+            text="Общий классификатор (эксперимент)",
+            command=self.open_general_classifier,
+        )
+        self.general_button.grid(row=1, column=6, columnspan=3, padx=5, pady=(5, 0), sticky="e")
 
         self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         self.main_paned.pack(fill=tk.BOTH, expand=True)
@@ -217,6 +225,14 @@ class NSFWAnalyzerApp:
         self.analyze_button.config(text="Остановить" if active else "Анализировать", state=tk.NORMAL)
         if not active:
             self.move_button.config(state=tk.NORMAL if self.all_files else tk.DISABLED)
+
+    def open_general_classifier(self) -> None:
+        from .general_ui import GeneralClassifierWindow
+
+        self.general_window = GeneralClassifierWindow(
+            self.root,
+            initial_folder=self.path_entry.get().strip(),
+        )
 
     def browse_folder(self) -> None:
         folder_path = filedialog.askdirectory()
