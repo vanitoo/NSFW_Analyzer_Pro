@@ -367,6 +367,7 @@ class GeneralClassifierWindow:
         self.path_to_item[str(row[2])] = item
 
     def _apply_result(self, path: str, result: dict) -> None:
+        updated_row: list | None = None
         for row in self.all_files:
             if str(row[2]) == path:
                 row[5] = str(result.get("kind", ""))
@@ -374,11 +375,15 @@ class GeneralClassifierWindow:
                 row[7] = str(result.get("subcategory", ""))
                 row[8] = f"{float(result.get('score', 0.0)):.4f}"
                 row[9] = str(result.get("tags", ""))
+                updated_row = row
                 break
+
+        if updated_row is None:
+            return
 
         item = self.path_to_item.get(path)
         if item and self.tree.exists(item):
-            self.tree.item(item, values=row)
+            self.tree.item(item, values=updated_row)
 
     def _reset_filters(self) -> None:
         self.kind_filter.set("Все типы")
