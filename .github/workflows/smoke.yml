@@ -1,0 +1,40 @@
+name: Python smoke checks
+
+on:
+  push:
+    branches:
+      - cleanup/stabilize-root
+      - feature/general-image-classifier
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile Python sources
+        run: python -m compileall -q main.py src
+      - name: Parse project metadata
+        run: python -c "import tomllib; tomllib.load(open('pyproject.toml','rb')); print('pyproject.toml OK')"
+
+      - name: Verify source layout
+        run: |
+          test -f main.py
+          test -f src/__init__.py
+          test -f src/ui.py
+          test -f src/general_ui.py
+          test -f src/general_classifier.py
+          test -f src/general_categories.py
+          test -f requirements-general.txt
+          test ! -e ui.py
+          test ! -e v1
+          test ! -e v3
+
+      - name: Verify cache layout
+        run: |
+          python -c "from pathlib import Path; from src.paths import CACHE_DIR, PROJECT_ROOT; expected=(Path.cwd()/'.cache').resolve(); assert PROJECT_ROOT==Path.cwd().resolve(); assert CACHE_DIR==expected; print('cache:', CACHE_DIR)"

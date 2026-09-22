@@ -1,33 +1,30 @@
 @echo off
-title %cd%
+setlocal
+cd /d "%~dp0"
+title NSFW Analyzer Pro
+
+where python >nul 2>nul
+if errorlevel 1 (
+    echo Python not found. Install Python 3.11 or newer and try again.
+    exit /b 1
+)
 
 if not exist .venv (
     echo Creating virtual environment...
-    python -m venv .venv
+    python -m venv .venv || exit /b 1
 )
 
-echo Activating virtual environment...
-call .venv\Scripts\activate
+call .venv\Scripts\activate || exit /b 1
 
-if not exist .venv\.setup_done (
-    if exist requirements.txt (
-        echo Updating pip and installing dependencies...
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        echo. > .venv\.setup_done
-    ) else (
-        echo requirements.txt not found, skipping dependency installation.
-    )
-) else (
-    echo Dependencies already installed, skipping installation.
-)
+echo Installing/updating base dependencies...
+python -m pip install --disable-pip-version-check -r requirements.txt || exit /b 1
 
-if exist main.py (
-    echo Starting program...
-    python main.py
-) else (
-    echo main.py not found.
-)
+echo Installing/updating additional NSFW models...
+python -m pip install --disable-pip-version-check -r requirements-models.txt || exit /b 1
 
-echo Done.
-rem pause
+echo Installing experimental general classifier...
+python -m pip install --disable-pip-version-check -r requirements-general.txt || exit /b 1
+
+echo Starting NSFW Analyzer Pro...
+python main.py
+endlocal
