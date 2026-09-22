@@ -7,14 +7,11 @@ from typing import Callable
 from PIL import Image
 
 from .general_categories import GENERAL_CATEGORIES
-from .paths import HUGGINGFACE_CACHE_DIR
+from .paths import OPENCLIP_CACHE_DIR
 
 MODEL_NAME = "MobileCLIP2-S0"
 PRETRAINED_NAME = "dfndr2b"
 MODEL_REPO = "timm/MobileCLIP2-S0-OpenCLIP"
-OPENCLIP_CACHE_DIR = HUGGINGFACE_CACHE_DIR / "open_clip"
-
-
 class GeneralImageClassifier:
     def __init__(self, log: Callable[[str], None]) -> None:
         self.log = log
