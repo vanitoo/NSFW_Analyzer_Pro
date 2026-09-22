@@ -22,6 +22,7 @@ from .analyzer import (
     reset_model,
 )
 from .diagnostics import build_startup_report
+from .general_ui import GeneralClassifierTab
 from .scanner import scan_folder_async
 from .utils import log_message
 
@@ -30,8 +31,8 @@ class NSFWAnalyzerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("NSFW Analyzer Pro")
-        self.root.geometry("1400x800")
-        self.root.minsize(980, 620)
+        self.root.geometry("1500x850")
+        self.root.minsize(1050, 650)
 
         self.running = True
         self.stop_analysis = False
@@ -46,8 +47,18 @@ class NSFWAnalyzerApp:
 
         self.all_files: list[list] = []
         self._last_preview_path: str | None = None
+        self.folder_var = tk.StringVar()
+
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+
+        self.nsfw_tab = ttk.Frame(self.notebook)
+        self.general_tab_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.nsfw_tab, text="NSFW-анализ")
+        self.notebook.add(self.general_tab_frame, text="Общий классификатор")
 
         self._create_widgets()
+        self.general_tab = GeneralClassifierTab(self.general_tab_frame, self.folder_var)
         self.root.after(100, self.process_queue)
         self.status_var.set("Готов к работе")
         threading.Thread(
@@ -57,12 +68,12 @@ class NSFWAnalyzerApp:
         ).start()
 
     def _create_widgets(self) -> None:
-        self.control_frame = tk.Frame(self.root)
+        self.control_frame = tk.Frame(self.nsfw_tab)
         self.control_frame.pack(fill=tk.X, padx=5, pady=5)
         self.control_frame.columnconfigure(1, weight=1)
 
         tk.Label(self.control_frame, text="Папка:").grid(row=0, column=0, padx=5)
-        self.path_entry = tk.Entry(self.control_frame, width=50)
+        self.path_entry = tk.Entry(self.control_frame, width=50, textvariable=self.folder_var)
         self.path_entry.grid(row=0, column=1, padx=5, sticky="ew")
 
         self.browse_button = tk.Button(self.control_frame, text="Обзор", command=self.browse_folder)
@@ -127,7 +138,7 @@ class NSFWAnalyzerApp:
         self.category_filter_combobox.grid(row=1, column=3, columnspan=2, padx=5, pady=(5, 0), sticky="w")
         self.category_filter_combobox.bind("<<ComboboxSelected>>", self.apply_filter)
 
-        self.main_paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL)
+        self.main_paned = tk.PanedWindow(self.nsfw_tab, orient=tk.HORIZONTAL)
         self.main_paned.pack(fill=tk.BOTH, expand=True)
 
         self.left_paned = tk.PanedWindow(self.main_paned, orient=tk.VERTICAL)
@@ -185,7 +196,7 @@ class NSFWAnalyzerApp:
         self.preview_label = tk.Label(self.preview_frame, text="Выберите изображение")
         self.preview_label.pack(fill=tk.BOTH, expand=True)
 
-        status_frame = tk.Frame(self.root, bd=1, relief=tk.SUNKEN)
+        status_frame = tk.Frame(self.nsfw_tab, bd=1, relief=tk.SUNKEN)
         status_frame.pack(side=tk.BOTTOM, fill=tk.X)
         self.status_var = tk.StringVar()
         self.status_bar = tk.Label(status_frame, textvariable=self.status_var, anchor="w")
@@ -196,8 +207,8 @@ class NSFWAnalyzerApp:
         self.result_tree.bind("<Double-1>", self.open_image)
         self.result_tree.bind("<Return>", self.open_image)
         self.result_tree.bind("<<TreeviewSelect>>", self.show_preview)
-        self.root.bind("<F6>", self.move_selected_file_by_filter)
-        self.root.bind("<Delete>", self.delete_selected_file)
+        self.result_tree.bind("<F6>", self.move_selected_file_by_filter)
+        self.result_tree.bind("<Delete>", self.delete_selected_file)
 
     def _set_scanning(self, active: bool) -> None:
         state = tk.DISABLED if active else tk.NORMAL
@@ -232,8 +243,7 @@ class NSFWAnalyzerApp:
         self.preview_label.image = None
         self._last_preview_path = None
 
-        self.path_entry.delete(0, tk.END)
-        self.path_entry.insert(0, folder_path)
+        self.folder_var.set(folder_path)
         self.move_button.config(state=tk.DISABLED)
         self._set_scanning(True)
 
@@ -609,4 +619,5 @@ class NSFWAnalyzerApp:
     def on_close(self) -> None:
         self.running = False
         self.stop_analysis = True
+        self.general_tab.shutdown()
         self.root.destroy()
