@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -21,6 +22,16 @@ class RAMPlusPlusBackend:
         self.device_name = "не загружен"
 
     def _runtime_python(self) -> Path:
+        override = os.getenv("NSFW_ANALYZER_RAMPP_PYTHON")
+        if override:
+            python_path = Path(os.path.expandvars(os.path.expanduser(override))).resolve()
+            if not python_path.exists():
+                raise RuntimeError(
+                    "NSFW_ANALYZER_RAMPP_PYTHON указывает на несуществующий файл: "
+                    f"{python_path}"
+                )
+            return python_path
+
         if sys.platform.startswith("win"):
             python_path = PROJECT_ROOT / ".venv-rampp" / "Scripts" / "python.exe"
         else:
@@ -28,7 +39,8 @@ class RAMPlusPlusBackend:
         if not python_path.exists():
             raise RuntimeError(
                 "RAM++ использует отдельное окружение из-за конфликта старого timm с OpenCLIP. "
-                "Сначала запустите SETUP_RAMPP.cmd из корня проекта."
+                "На Windows запустите SETUP_RAMPP.cmd или задайте "
+                "NSFW_ANALYZER_RAMPP_PYTHON на Python готового RAM++ окружения."
             )
         return python_path
 
