@@ -17,7 +17,7 @@ from .models_extra import (
     release_extra_model,
 )
 from .models_legacy import ensure_opennsfw2_weights, initialize_gantman, tensorflow_device_name
-from .paths import CACHE_DIR
+from .paths import CACHE_DIR, TFHUB_CACHE_DIR
 from .utils import get_cpu_cores
 
 MODEL_YAHOO = "Yahoo NSFW"
@@ -132,7 +132,22 @@ def initialize_model(self: Any, model_name: str) -> None:
                 import tensorflow as tf
                 import tensorflow_hub as hub
 
+                hub_cached = False
+                try:
+                    hub_cached = any(TFHUB_CACHE_DIR.rglob("saved_model.pb"))
+                except OSError:
+                    pass
+
+                if hub_cached:
+                    _log(self, "[NSFW Hub] кэш найден: 100% — загрузка не требуется\n")
+                else:
+                    _log(
+                        self,
+                        "[NSFW Hub] кэш не найден: этап 1/2 — скачивание и распаковка TensorFlow Hub...\n",
+                    )
+
                 self.model = hub.load("https://tfhub.dev/GourmetAI/nsfw_classifier/1")
+                _log(self, "[NSFW Hub] этап 2/2 — модель загружена: 100%\n")
 
                 def predict_hub(path: str) -> tuple[float, str | None]:
                     image = _decode_image(path) / 255.0
