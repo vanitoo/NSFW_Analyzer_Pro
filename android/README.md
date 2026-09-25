@@ -11,7 +11,8 @@ Standalone Android application inside the desktop repository.
 - WorkManager runs gallery analysis outside the UI thread;
 - unchanged photos are skipped on subsequent runs;
 - ONNX Runtime Android is included;
-- NNAPI is enabled in the ONNX session factory;
+- a real compact MobileNetV4 NSFW ONNX classifier is supported;
+- NNAPI is enabled when available, with normal ONNX Runtime fallback;
 - UI shows gallery count, analyzed count, NSFW count and progress;
 - all processing is local.
 
@@ -25,10 +26,17 @@ app/src/main/assets/models/
   general.onnx
 ```
 
-The project intentionally does not commit model binaries yet. The app remains
-buildable without them and uses `NoOpAnalyzer`. The next model step is to
-choose/export a compact NSFW model and a compact general classifier, then add
-their exact preprocessing/input/output adapters.
+The first real mobile backend is a compact MobileNetV4 NSFW classifier (~10 MB)
+with five classes: `drawings / hentai / neutral / porn / sexy`. The app combines
+`hentai + porn + sexy` into `nsfwScore`.
+
+Model binaries are not committed to Git. `PREPARE_MODELS.cmd` downloads the
+pinned ONNX file and verifies its SHA-256. All normal Windows build scripts call
+model preparation automatically, so a fresh `BUILD_DEBUG.cmd` produces an APK
+with the NSFW model included.
+
+The `general.onnx` slot is reserved for the second compact general-purpose
+classifier; its adapter will be added separately.
 
 ## Requirements
 
@@ -39,6 +47,15 @@ their exact preprocessing/input/output adapters.
 - internet access on the first build so Gradle/Maven dependencies can download.
 
 Android Studio already includes a suitable JDK and can install the Android SDK.
+
+## Prepare models manually
+
+Normally this is automatic during a build. To download/verify the model only:
+
+```bat
+cd android
+PREPARE_MODELS.cmd
+```
 
 ## Build debug APK
 
