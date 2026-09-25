@@ -1,5 +1,8 @@
 # NSFW Analyzer Pro
 
+> Android MVP lives in `android/`: Kotlin/Compose + MediaStore + Room + WorkManager + ONNX Runtime. See `android/README.md` for build/install commands.
+
+
 **NSFW Analyzer Pro** — локальное настольное приложение на Python/Tkinter для пакетного анализа изображений и сортировки потенциально NSFW-контента.
 
 Текущая версия: **2.5.0**.
