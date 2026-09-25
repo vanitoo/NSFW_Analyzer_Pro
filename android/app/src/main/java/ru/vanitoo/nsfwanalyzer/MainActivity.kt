@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
 
         if (hasGalleryPermission()) {
             viewModel.refreshGalleryCount()
+            viewModel.startAnalysis()
         }
 
         setContent {
