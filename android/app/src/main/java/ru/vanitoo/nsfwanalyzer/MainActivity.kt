@@ -34,7 +34,10 @@ class MainActivity : ComponentActivity() {
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) viewModel.refreshGalleryCount()
+        if (granted) {
+            viewModel.refreshGalleryCount()
+            viewModel.startAnalysis()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
