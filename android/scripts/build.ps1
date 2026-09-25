@@ -1,6 +1,7 @@
 param(
     [ValidateSet("Debug", "Release", "BundleRelease", "Clean", "InstallDebug")]
-    [string]$Task = "Debug"
+    [string]$Task = "Debug",
+    [switch]$SkipModels
 )
 
 $ErrorActionPreference = "Stop"
@@ -58,6 +59,15 @@ if ($Sdk) {
     $Platform35 = Join-Path $Sdk "platforms\android-35"
     if (-not (Test-Path $Platform35)) {
         throw "Android SDK Platform 35 is missing. Install API 35 in Android Studio SDK Manager."
+    }
+}
+
+if ($Task -ne "Clean" -and -not $SkipModels) {
+    $PrepareModels = Join-Path $ProjectDir "scripts\prepare_models.ps1"
+    Write-Host "Preparing mobile models..."
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $PrepareModels
+    if ($LASTEXITCODE -ne 0) {
+        throw "Model preparation failed with exit code $LASTEXITCODE"
     }
 }
 
