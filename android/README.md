@@ -81,6 +81,23 @@ android/app/build/outputs/apk/release/app-release-unsigned.apk
 
 Signing will be added when package name and release strategy are finalized.
 
+## Build release AAB
+
+For a Play Store style bundle:
+
+```bat
+cd android
+BUILD_BUNDLE.cmd
+```
+
+Output:
+
+```text
+android/app/build/outputs/bundle/release/app-release.aab
+```
+
+The release output is not signed yet.
+
 ## Clean
 
 ```bat
