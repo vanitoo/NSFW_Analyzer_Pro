@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -145,7 +144,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        Spacer(Modifier.weight(1f))
+                        Spacer(Modifier.height(24.dp))
                         Text(
                             "MVP: MediaStore + Room + WorkManager + ONNX Runtime",
                             style = MaterialTheme.typography.bodySmall
