@@ -9,7 +9,7 @@ object OnnxRuntimeFactory {
         val environment = OrtEnvironment.getEnvironment()
         val modelFile = ModelAssets.copyToCache(context, assetName)
         val options = OrtSession.SessionOptions().apply {
-            addNnapi()
+            runCatching { addNnapi() }
             setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
         }
         return environment to environment.createSession(modelFile.absolutePath, options)
