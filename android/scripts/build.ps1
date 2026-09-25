@@ -13,7 +13,14 @@ $GradleBat = Join-Path $GradleHome "bin\gradle.bat"
 Write-Host "Android project: $ProjectDir"
 
 if (-not (Get-Command java -ErrorAction SilentlyContinue)) {
-    throw "Java not found. Install JDK 17 and add java to PATH."
+    $AndroidStudioJdk = "C:\Program Files\Android\Android Studio\jbr"
+    if (Test-Path (Join-Path $AndroidStudioJdk "bin\java.exe")) {
+        $env:JAVA_HOME = $AndroidStudioJdk
+        $env:Path = (Join-Path $AndroidStudioJdk "bin") + ";" + $env:Path
+        Write-Host "Using Android Studio JDK: $AndroidStudioJdk"
+    } else {
+        throw "Java not found. Install Android Studio/JDK 17 or add java to PATH."
+    }
 }
 
 if (-not (Test-Path $GradleBat)) {
@@ -30,6 +37,13 @@ if (-not (Test-Path $GradleBat)) {
 
 $Sdk = $env:ANDROID_SDK_ROOT
 if (-not $Sdk) { $Sdk = $env:ANDROID_HOME }
+if (-not $Sdk -and $env:LOCALAPPDATA) {
+    $DefaultSdk = Join-Path $env:LOCALAPPDATA "Android\Sdk"
+    if (Test-Path $DefaultSdk) {
+        $Sdk = $DefaultSdk
+        Write-Host "Using Android SDK: $Sdk"
+    }
+}
 
 $LocalProperties = Join-Path $ProjectDir "local.properties"
 if ($Sdk -and -not (Test-Path $LocalProperties)) {
@@ -37,7 +51,14 @@ if ($Sdk -and -not (Test-Path $LocalProperties)) {
     Set-Content -Path $LocalProperties -Value ("sdk.dir=" + $EscapedSdk)
     Write-Host "Created local.properties from Android SDK environment."
 } elseif (-not $Sdk -and -not (Test-Path $LocalProperties)) {
-    throw "Android SDK not found. Set ANDROID_SDK_ROOT/ANDROID_HOME or open android/ in Android Studio once."
+    throw "Android SDK not found. Install it with Android Studio or set ANDROID_SDK_ROOT."
+}
+
+if ($Sdk) {
+    $Platform35 = Join-Path $Sdk "platforms\android-35"
+    if (-not (Test-Path $Platform35)) {
+        throw "Android SDK Platform 35 is missing. Install API 35 in Android Studio SDK Manager."
+    }
 }
 
 $GradleTask = switch ($Task) {
