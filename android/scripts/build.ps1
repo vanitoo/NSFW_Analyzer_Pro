@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("Debug", "Release", "Clean", "InstallDebug")]
+    [ValidateSet("Debug", "Release", "BundleRelease", "Clean", "InstallDebug")]
     [string]$Task = "Debug"
 )
 
@@ -64,6 +64,7 @@ if ($Sdk) {
 $GradleTask = switch ($Task) {
     "Debug" { ":app:assembleDebug" }
     "Release" { ":app:assembleRelease" }
+    "BundleRelease" { ":app:bundleRelease" }
     "Clean" { "clean" }
     "InstallDebug" { ":app:installDebug" }
 }
@@ -84,4 +85,7 @@ if ($Task -eq "Debug") {
 } elseif ($Task -eq "Release") {
     Write-Host ""
     Write-Host ("Unsigned APK: " + (Join-Path $ProjectDir "app\build\outputs\apk\release\app-release-unsigned.apk"))
+} elseif ($Task -eq "BundleRelease") {
+    Write-Host ""
+    Write-Host ("AAB: " + (Join-Path $ProjectDir "app\build\outputs\bundle\release\app-release.aab"))
 }
